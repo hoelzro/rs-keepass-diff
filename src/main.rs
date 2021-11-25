@@ -1,3 +1,4 @@
+use std::convert::{TryFrom, TryInto};
 use std::env;
 use std::io;
 use std::io::Read;
@@ -23,6 +24,46 @@ enum KeepassLoadError {
 
 #[derive(Debug)]
 struct KeepassDatabase {
+}
+
+enum FieldID {
+    EndOfHeader,
+    Comment,
+    CipherID,
+    CompressionFlags,
+    MasterSeed,
+    TransformSeed,
+    TransformRounds,
+    EncryptionIV,
+    ProtectedStreamKey,
+    StreamStartBytes,
+    InnerRandomStreamID,
+    KdfParameters,
+    PublicCustomData,
+}
+
+impl TryFrom<u8> for FieldID {
+    type Error = ();
+
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        match v {
+            0  => Ok(FieldID::EndOfHeader),
+            1  => Ok(FieldID::Comment),
+            2  => Ok(FieldID::CipherID),
+            3  => Ok(FieldID::CompressionFlags),
+            4  => Ok(FieldID::MasterSeed),
+            5  => Ok(FieldID::TransformSeed),
+            6  => Ok(FieldID::TransformRounds),
+            7  => Ok(FieldID::EncryptionIV),
+            8  => Ok(FieldID::ProtectedStreamKey),
+            9  => Ok(FieldID::StreamStartBytes),
+            10 => Ok(FieldID::InnerRandomStreamID),
+            11 => Ok(FieldID::KdfParameters),
+            12 => Ok(FieldID::PublicCustomData),
+
+            _ => Err(()),
+        }
+    }
 }
 
 // XXX make it a Read or something
@@ -58,6 +99,56 @@ fn load_database(mut db_file: File, _password: String) -> Result<KeepassDatabase
 
     if version != FILE_VERSION_3 {
         return Err(KeepassLoadError::BadFileVersion);
+    }
+
+    loop {
+        if let Err(err) = db_file.read_exact(&mut buf[0..]) {
+            return Err(KeepassLoadError::IO(err))
+        }
+
+        let field_id: FieldID = buf[0].try_into().unwrap(); // XXX don't unwrap!
+        let field_length = u16::from_le_bytes(buf[1..3].try_into().unwrap()); // XXX this feels...wrong
+
+        // XXX shorthand for combining these two?
+        let mut field_data = Vec::with_capacity(field_length.into());
+        field_data.resize(field_length.into(), 0);
+
+        if let Err(err) = db_file.read_exact(field_data.as_mut_slice()) {
+            return Err(KeepassLoadError::IO(err))
+        }
+
+        match field_id {
+            FieldID::EndOfHeader => {
+                break;
+            },
+            FieldID::CipherID => {
+            },
+            FieldID::CompressionFlags => {
+            },
+            FieldID::MasterSeed => {
+            },
+            FieldID::TransformSeed => {
+            },
+            FieldID::TransformRounds => {
+            },
+            FieldID::EncryptionIV => {
+            },
+            FieldID::ProtectedStreamKey => {
+            },
+            FieldID::StreamStartBytes => {
+            },
+            FieldID::InnerRandomStreamID => {
+            },
+
+            FieldID::Comment => {
+            },
+            FieldID::KdfParameters => {
+            },
+            FieldID::PublicCustomData => {
+            },
+        }
+
+        break; // XXX for now
     }
 
     Ok(KeepassDatabase{})
