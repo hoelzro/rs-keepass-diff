@@ -12,6 +12,11 @@ const FILE_VERSION_3: u32 = 0x00030000;
 // XXX can I infer the length?
 const CIPHER_AES256: [u8; 16] = [0x31, 0xc1, 0xf2, 0xe6, 0xbf, 0x71, 0x43, 0x50, 0xbe, 0x58, 0x05, 0x21, 0x6a, 0xfc, 0x5a, 0xff];
 const COMPRESSION_ALGORITHM_GZIP: u32 = 1;
+#[allow(dead_code)]
+const STREAM_ALGORITHM_ARC_FOUR_VARIANT: u32 = 1;
+const STREAM_ALGORITHM_SALSA20: u32 = 2;
+#[allow(dead_code)]
+const STREAM_ALGORITHM_CHACHA20: u32 = 3;
 
 // XXX break this out into its own file/module/library/package/crate/whatever
 fn read_password() -> String {
@@ -25,6 +30,8 @@ enum KeepassLoadError {
     BadFileVersion,
     UnsupportedCipher,
     UnsupportedCompressionAlgorithm,
+    UnsupportedStreamAlgorithm,
+    Unimplemented,
 }
 
 #[derive(Debug)]
@@ -124,6 +131,14 @@ fn load_database(mut db_file: File, _password: String) -> Result<KeepassDatabase
             return Err(KeepassLoadError::IO(err))
         }
 
+        // XXX is using with_capacity actually helpful here?
+        let mut master_seed = Vec::with_capacity(16);
+        let mut transform_seed = Vec::with_capacity(16);
+        let mut encryption_iv = Vec::with_capacity(16);
+        let mut transform_rounds = 0u64;
+        let mut protected_stream_key = Vec::with_capacity(32);
+        let mut stream_start_bytes = Vec::with_capacity(32);
+
         match field_id {
             FieldID::EndOfHeader => {
                 break;
@@ -140,25 +155,42 @@ fn load_database(mut db_file: File, _password: String) -> Result<KeepassDatabase
                 }
             },
             FieldID::MasterSeed => {
+                // XXX check field length
+                master_seed = field_data;
             },
             FieldID::TransformSeed => {
+                // XXX check field length
+                transform_seed = field_data;
             },
             FieldID::TransformRounds => {
+                transform_rounds = u64::from_le_bytes(field_data.try_into().unwrap());
             },
             FieldID::EncryptionIV => {
+                encryption_iv = field_data;
             },
             FieldID::ProtectedStreamKey => {
+                // XXX check field length
+                protected_stream_key = field_data;
             },
             FieldID::StreamStartBytes => {
+                // XXX check field length
+                stream_start_bytes = field_data;
             },
             FieldID::InnerRandomStreamID => {
+                let stream_id = u32::from_le_bytes(field_data.try_into().unwrap());
+                if stream_id != STREAM_ALGORITHM_SALSA20 {
+                    return Err(KeepassLoadError::UnsupportedStreamAlgorithm);
+                }
             },
 
             FieldID::Comment => {
+                return Err(KeepassLoadError::Unimplemented);
             },
             FieldID::KdfParameters => {
+                return Err(KeepassLoadError::Unimplemented);
             },
             FieldID::PublicCustomData => {
+                return Err(KeepassLoadError::Unimplemented);
             },
         }
 
