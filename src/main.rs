@@ -11,6 +11,7 @@ const FILE_VERSION_CRITICAL_MASK: u32 = 0xFFFF0000;
 const FILE_VERSION_3: u32 = 0x00030000;
 // XXX can I infer the length?
 const CIPHER_AES256: [u8; 16] = [0x31, 0xc1, 0xf2, 0xe6, 0xbf, 0x71, 0x43, 0x50, 0xbe, 0x58, 0x05, 0x21, 0x6a, 0xfc, 0x5a, 0xff];
+const COMPRESSION_ALGORITHM_GZIP: u32 = 1;
 
 // XXX break this out into its own file/module/library/package/crate/whatever
 fn read_password() -> String {
@@ -23,6 +24,7 @@ enum KeepassLoadError {
     BadMagicSignature,
     BadFileVersion,
     UnsupportedCipher,
+    UnsupportedCompressionAlgorithm,
 }
 
 #[derive(Debug)]
@@ -132,6 +134,10 @@ fn load_database(mut db_file: File, _password: String) -> Result<KeepassDatabase
                 }
             },
             FieldID::CompressionFlags => {
+                let compression_algorithm = u32::from_le_bytes(field_data.try_into().unwrap());
+                if compression_algorithm != COMPRESSION_ALGORITHM_GZIP {
+                    return Err(KeepassLoadError::UnsupportedCompressionAlgorithm);
+                }
             },
             FieldID::MasterSeed => {
             },
