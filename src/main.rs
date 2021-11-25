@@ -36,6 +36,12 @@ enum KeepassLoadError {
 
 #[derive(Debug)]
 struct KeepassDatabase {
+    master_seed: [u8; 32],
+    transform_seed: [u8; 32],
+    encryption_iv: [u8; 16], // XXX I think the size depends on the cipher algorithm
+    transform_rounds: u64,
+    protected_stream_key: [u8; 32],
+    stream_start_bytes: [u8; 32],
 }
 
 enum FieldID {
@@ -114,9 +120,9 @@ fn load_database(mut db_file: File, _password: String) -> Result<KeepassDatabase
     }
 
     // XXX is using with_capacity actually helpful here?
-    let mut master_seed = Vec::with_capacity(16);
-    let mut transform_seed = Vec::with_capacity(16);
-    let mut encryption_iv = Vec::with_capacity(16);
+    let mut master_seed = Vec::with_capacity(32);
+    let mut transform_seed = Vec::with_capacity(32);
+    let mut encryption_iv = Vec::with_capacity(32);
     let mut transform_rounds = 0u64;
     let mut protected_stream_key = Vec::with_capacity(32);
     let mut stream_start_bytes = Vec::with_capacity(32);
@@ -195,14 +201,14 @@ fn load_database(mut db_file: File, _password: String) -> Result<KeepassDatabase
         }
     }
 
-    println!("master_seed: {:?}", master_seed);
-    println!("transform_seed: {:?}", transform_seed);
-    println!("encryption_iv: {:?}", encryption_iv);
-    println!("transform_rounds: {:?}", transform_rounds);
-    println!("protected_stream_key: {:?}", protected_stream_key);
-    println!("stream_start_bytes: {:?}", stream_start_bytes);
-
-    Ok(KeepassDatabase{})
+    Ok(KeepassDatabase{
+        master_seed: master_seed.try_into().unwrap(),
+        transform_seed: transform_seed.try_into().unwrap(),
+        encryption_iv: encryption_iv.try_into().unwrap(),
+        transform_rounds: transform_rounds,
+        protected_stream_key: protected_stream_key.try_into().unwrap(),
+        stream_start_bytes: stream_start_bytes.try_into().unwrap(),
+    })
 }
 
 fn main() {
