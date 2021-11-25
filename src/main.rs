@@ -9,6 +9,8 @@ const MAGIC_SIGNATURE_1: u32 = 0x9AA2D903;
 const MAGIC_SIGNATURE_2: u32 = 0xB54BFB67;
 const FILE_VERSION_CRITICAL_MASK: u32 = 0xFFFF0000;
 const FILE_VERSION_3: u32 = 0x00030000;
+// XXX can I infer the length?
+const CIPHER_AES256: [u8; 16] = [0x31, 0xc1, 0xf2, 0xe6, 0xbf, 0x71, 0x43, 0x50, 0xbe, 0x58, 0x05, 0x21, 0x6a, 0xfc, 0x5a, 0xff];
 
 // XXX break this out into its own file/module/library/package/crate/whatever
 fn read_password() -> String {
@@ -20,6 +22,7 @@ enum KeepassLoadError {
     IO(io::Error),
     BadMagicSignature,
     BadFileVersion,
+    UnsupportedCipher,
 }
 
 #[derive(Debug)]
@@ -102,6 +105,8 @@ fn load_database(mut db_file: File, _password: String) -> Result<KeepassDatabase
     }
 
     loop {
+        let mut buf = [0u8; 3];
+
         if let Err(err) = db_file.read_exact(&mut buf[0..]) {
             return Err(KeepassLoadError::IO(err))
         }
@@ -122,6 +127,9 @@ fn load_database(mut db_file: File, _password: String) -> Result<KeepassDatabase
                 break;
             },
             FieldID::CipherID => {
+                if field_data.as_slice() != CIPHER_AES256 {
+                    return Err(KeepassLoadError::UnsupportedCipher);
+                }
             },
             FieldID::CompressionFlags => {
             },
