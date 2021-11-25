@@ -193,8 +193,6 @@ fn load_database(mut db_file: File, _password: String) -> Result<KeepassDatabase
                 return Err(KeepassLoadError::Unimplemented);
             },
         }
-
-        break; // XXX for now
     }
 
     Ok(KeepassDatabase{})
