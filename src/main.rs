@@ -201,6 +201,8 @@ fn load_database(mut db_file: File, _password: String) -> Result<KeepassDatabase
         }
     }
 
+    // XXX verify we got all the fields
+
     Ok(KeepassDatabase{
         master_seed: master_seed.try_into().unwrap(),
         transform_seed: transform_seed.try_into().unwrap(),
