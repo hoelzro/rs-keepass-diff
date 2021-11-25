@@ -4,6 +4,12 @@ use std::io::Read;
 use std::fs::File;
 use std::process;
 
+const MAGIC_SIGNATURE_1: u32 = 0x9AA2D903;
+const MAGIC_SIGNATURE_2: u32 = 0xB54BFB67;
+const FILE_VERSION_CRITICAL_MASK: u32 = 0xFFFF0000;
+const FILE_VERSION_3: u32 = 0x00030000;
+
+// XXX break this out into its own file/module/library/package/crate/whatever
 fn read_password() -> String {
     "".to_string()
 }
@@ -11,6 +17,8 @@ fn read_password() -> String {
 #[derive(Debug)]
 enum KeepassLoadError {
     IO(io::Error),
+    BadMagicSignature,
+    BadFileVersion,
 }
 
 #[derive(Debug)]
@@ -19,14 +27,38 @@ struct KeepassDatabase {
 
 // XXX make it a Read or something
 fn load_database(mut db_file: File, _password: String) -> Result<KeepassDatabase, KeepassLoadError> {
-    let mut buf: [u8; 4] = [0, 0, 0, 0]; // XXX why do I have to initialize this? b/c rust isn't smart enough to know that `read` will blow it away?
+    let mut buf = [0u8; 4];
 
     // XXX there has to be a way to improve this
     if let Err(err) = db_file.read_exact(&mut buf) {
         return Err(KeepassLoadError::IO(err))
     }
 
-    println!("{:?}", buf);
+    let magic1 = u32::from_le_bytes(buf);
+
+    if magic1 != MAGIC_SIGNATURE_1 {
+        return Err(KeepassLoadError::BadMagicSignature);
+    }
+
+    if let Err(err) = db_file.read_exact(&mut buf) {
+        return Err(KeepassLoadError::IO(err))
+    }
+
+    let magic2 = u32::from_le_bytes(buf);
+
+    if magic2 != MAGIC_SIGNATURE_2 {
+        return Err(KeepassLoadError::BadMagicSignature);
+    }
+
+    if let Err(err) = db_file.read_exact(&mut buf) {
+        return Err(KeepassLoadError::IO(err))
+    }
+
+    let version = u32::from_le_bytes(buf) & FILE_VERSION_CRITICAL_MASK;
+
+    if version != FILE_VERSION_3 {
+        return Err(KeepassLoadError::BadFileVersion);
+    }
 
     Ok(KeepassDatabase{})
 }
