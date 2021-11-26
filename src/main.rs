@@ -5,6 +5,12 @@ use std::io::Read;
 use std::fs::File;
 use std::process;
 
+use crypto::aes;
+use crypto::buffer::{RefReadBuffer, RefWriteBuffer};
+use crypto::blockmodes;
+use crypto::digest::Digest;
+use crypto::sha2::Sha256;
+
 const MAGIC_SIGNATURE_1: u32 = 0x9AA2D903;
 const MAGIC_SIGNATURE_2: u32 = 0xB54BFB67;
 const FILE_VERSION_CRITICAL_MASK: u32 = 0xFFFF0000;
@@ -20,7 +26,7 @@ const STREAM_ALGORITHM_CHACHA20: u32 = 3;
 
 // XXX break this out into its own file/module/library/package/crate/whatever
 fn read_password() -> String {
-    "".to_string()
+    "abc123".to_string()
 }
 
 #[derive(Debug)]
@@ -31,6 +37,7 @@ enum KeepassLoadError {
     UnsupportedCipher,
     UnsupportedCompressionAlgorithm,
     UnsupportedStreamAlgorithm,
+    StreamStartMismatch,
     Unimplemented,
 }
 
@@ -85,7 +92,7 @@ impl TryFrom<u8> for FieldID {
 }
 
 // XXX make it a Read or something
-fn load_database(mut db_file: File, _password: String) -> Result<KeepassDatabase, KeepassLoadError> {
+fn load_database(mut db_file: File, password: String) -> Result<KeepassDatabase, KeepassLoadError> {
     let mut buf = [0u8; 4];
 
     // XXX there has to be a way to improve this
@@ -202,6 +209,66 @@ fn load_database(mut db_file: File, _password: String) -> Result<KeepassDatabase
     }
 
     // XXX verify we got all the fields
+
+    let password_hash = {
+        let mut hasher = Sha256::new();
+        hasher.input_str(&password);
+        let mut hash: [u8; 32] = [0; 32];
+        hasher.result(&mut hash);
+        hash
+    };
+
+    let composite_key = {
+        let mut hasher = Sha256::new();
+        hasher.input(&password_hash);
+        let mut hash: [u8; 32] = [0; 32];
+        hasher.result(&mut hash);
+        hash
+    };
+
+    let mut transformed_key = composite_key;
+
+    for _ in 0..transform_rounds {
+        // XXX do I really need to recreate this over and over?
+        let mut aes = aes::ecb_encryptor(aes::KeySize::KeySize256, &transform_seed, blockmodes::NoPadding);
+        let mut this_rounds_output = [0u8; 32];
+        aes.encrypt(&mut RefReadBuffer::new(&transformed_key), &mut RefWriteBuffer::new(&mut this_rounds_output), true).unwrap();
+        transformed_key.copy_from_slice(&this_rounds_output);
+    }
+
+    transformed_key = {
+        let mut hasher = Sha256::new();
+        hasher.input(&transformed_key);
+        let mut hash: [u8; 32] = [0; 32];
+        hasher.result(&mut hash);
+        hash
+    };
+
+    let master_key = {
+        let mut hasher = Sha256::new();
+        hasher.input(&master_seed);
+        hasher.input(&transformed_key);
+        let mut hash: [u8; 32] = [0; 32];
+        hasher.result(&mut hash);
+        hash
+    };
+
+    // XXX I hate this reuse of aes
+    let mut aes = aes::cbc_decryptor(aes::KeySize::KeySize256, &master_key, &encryption_iv, blockmodes::NoPadding);
+
+    let mut first_block = Vec::with_capacity(stream_start_bytes.len());
+    first_block.resize(stream_start_bytes.len(), 0);
+
+    let mut first_block_plaintext = Vec::with_capacity(stream_start_bytes.len());
+    first_block_plaintext.resize(stream_start_bytes.len(), 0);
+
+    // XXX shitty error handling
+    db_file.read_exact(first_block.as_mut_slice()).unwrap();
+    aes.decrypt(&mut RefReadBuffer::new(&first_block), &mut RefWriteBuffer::new(&mut first_block_plaintext), true).unwrap();
+
+    if first_block_plaintext != stream_start_bytes {
+        return Err(KeepassLoadError::StreamStartMismatch);
+    }
 
     Ok(KeepassDatabase{
         master_seed: master_seed.try_into().unwrap(),
