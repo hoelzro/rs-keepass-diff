@@ -6,7 +6,7 @@ use std::fs::File;
 use std::process;
 
 use crypto::aes;
-use crypto::buffer::{RefReadBuffer, RefWriteBuffer};
+use crypto::buffer::{BufferResult, RefReadBuffer, RefWriteBuffer, ReadBuffer, WriteBuffer};
 use crypto::blockmodes;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
@@ -256,15 +256,27 @@ fn load_database(mut db_file: File, password: String) -> Result<KeepassDatabase,
     // XXX I hate this reuse of aes
     let mut aes = aes::cbc_decryptor(aes::KeySize::KeySize256, &master_key, &encryption_iv, blockmodes::NoPadding);
 
-    let mut first_block = Vec::with_capacity(stream_start_bytes.len());
-    first_block.resize(stream_start_bytes.len(), 0);
-
-    let mut first_block_plaintext = Vec::with_capacity(stream_start_bytes.len());
-    first_block_plaintext.resize(stream_start_bytes.len(), 0);
-
     // XXX shitty error handling
-    db_file.read_exact(first_block.as_mut_slice()).unwrap();
-    aes.decrypt(&mut RefReadBuffer::new(&first_block), &mut RefWriteBuffer::new(&mut first_block_plaintext), true).unwrap();
+    let mut cipher_text = Vec::new();
+    db_file.read_to_end(&mut cipher_text).unwrap();
+
+    let mut plain_text = Vec::new();
+    let mut cipher_text_buffer = RefReadBuffer::new(&cipher_text);
+    let mut work_space = [0; 4096];
+    let mut plain_text_buffer = RefWriteBuffer::new(&mut work_space);
+
+    loop {
+        let res = aes.decrypt(&mut cipher_text_buffer, &mut plain_text_buffer, true).unwrap();
+        plain_text.extend(plain_text_buffer.take_read_buffer().take_remaining().iter().map(|&i| i));
+
+        match res {
+            BufferResult::BufferUnderflow => break,
+            BufferResult::BufferOverflow => continue,
+        }
+    }
+
+    let first_block_plaintext = &plain_text[..stream_start_bytes.len()];
+    let remaining_plaintext = &plain_text[stream_start_bytes.len()..];
 
     if first_block_plaintext != stream_start_bytes {
         return Err(KeepassLoadError::StreamStartMismatch);
