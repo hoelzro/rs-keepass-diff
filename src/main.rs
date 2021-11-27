@@ -11,6 +11,8 @@ use crypto::blockmodes;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 
+use flate2::read::GzDecoder;
+
 const MAGIC_SIGNATURE_1: u32 = 0x9AA2D903;
 const MAGIC_SIGNATURE_2: u32 = 0xB54BFB67;
 const FILE_VERSION_CRITICAL_MASK: u32 = 0xFFFF0000;
@@ -308,8 +310,11 @@ fn load_database(mut db_file: File, password: String) -> Result<KeepassDatabase,
 
         remaining_plaintext.read_exact(&mut block_data).unwrap();
 
-        // XXX gunzip here
-        println!("block {} has {} compressed bytes", block_id, block_data.len());
+        let mut gunzip = GzDecoder::new(block_data.as_slice());
+        let mut uncompressed = String::new();
+        gunzip.read_to_string(&mut uncompressed).unwrap();
+
+        println!("{:?}", uncompressed);
     }
 
     Ok(KeepassDatabase{
