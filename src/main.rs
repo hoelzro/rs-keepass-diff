@@ -38,6 +38,7 @@ enum KeepassLoadError {
     UnsupportedCompressionAlgorithm,
     UnsupportedStreamAlgorithm,
     StreamStartMismatch,
+    InvalidFinalHash,
     Unimplemented,
 }
 
@@ -276,10 +277,39 @@ fn load_database(mut db_file: File, password: String) -> Result<KeepassDatabase,
     }
 
     let first_block_plaintext = &plain_text[..stream_start_bytes.len()];
-    let remaining_plaintext = &plain_text[stream_start_bytes.len()..];
+    let mut remaining_plaintext = &plain_text[stream_start_bytes.len()..];
 
     if first_block_plaintext != stream_start_bytes {
         return Err(KeepassLoadError::StreamStartMismatch);
+    }
+
+    loop {
+        let mut buf = [0u8; 4];
+        remaining_plaintext.read_exact(&mut buf).unwrap();
+        let block_id = u32::from_le_bytes(buf);
+
+        let mut block_hash = [0u8; 32];
+        remaining_plaintext.read_exact(&mut block_hash).unwrap();
+
+        remaining_plaintext.read_exact(&mut buf).unwrap();
+        let block_size = u32::from_le_bytes(buf);
+
+        if block_size == 0 {
+            if block_hash != [0u8; 32] {
+                return Err(KeepassLoadError::InvalidFinalHash);
+            }
+
+            break;
+        }
+
+        // XXX I like the idea of a block returning an immutable variable for this...
+        let mut block_data = Vec::with_capacity(block_size as usize);
+        block_data.resize(block_size as usize, 0);
+
+        remaining_plaintext.read_exact(&mut block_data).unwrap();
+
+        // XXX gunzip here
+        println!("block {} has {} compressed bytes", block_id, block_data.len());
     }
 
     Ok(KeepassDatabase{
