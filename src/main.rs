@@ -565,20 +565,4 @@ mod tests {
             _ => panic!("Expected StreamStartMismatch, got {:?}", res),
         }
     }
-
-    #[test]
-    fn invalid_final_hash() {
-        let mut f = File::open("one.kdbx").unwrap();
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf).unwrap();
-
-        buf[1885] += 1;
-
-        let res = load_database(buf.as_slice(), String::from("abc123"));
-
-        match res {
-            Err(KeepassLoadError::InvalidFinalHash) => {},
-            _ => panic!("Expected InvalidFinalHash, got {:?}", res),
-        }
-    }
 }
