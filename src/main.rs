@@ -459,3 +459,15 @@ fn main() {
 
     println!("{:?}", keepass_db)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+    use crate::load_database;
+
+    #[test]
+    fn valid_kdbx_file() {
+        let f = File::open("one.kdbx").unwrap();
+        let _ = load_database(f, String::from("abc123")).unwrap();
+    }
+}
