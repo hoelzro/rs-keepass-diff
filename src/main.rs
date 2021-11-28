@@ -86,19 +86,19 @@ impl TryFrom<u8> for FieldID {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Clone, Deserialize, Debug)]
 struct KeeValuePair {
     Key: String,
     Value: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Clone, Deserialize, Debug)]
 struct KeepassDatabaseEntry {
     #[serde(rename = "String")]
     KeyValues: Vec<KeeValuePair>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Clone, Deserialize, Debug)]
 struct KeepassDatabaseGroup {
     #[serde(default)]
     Name: String,
@@ -337,7 +337,48 @@ fn load_database(mut db_file: File, password: String) -> Result<KeepassDatabase,
 
         let db: KeepassDatabase = quick_xml::de::from_str(&uncompressed).unwrap();
 
-        return Ok(db);
+        let password_decryption_key = {
+            let mut hasher = Sha256::new();
+            hasher.input(&protected_stream_key);
+            let mut hash: [u8; 32] = [0; 32];
+            hasher.result(&mut hash);
+            hash
+        };
+
+        return Ok(KeepassDatabase{Root: decrypt_passwords(&db.Root, password_decryption_key)});
+    }
+}
+
+fn decrypt_passwords(group: &KeepassDatabaseGroup, key: [u8; 32]) -> KeepassDatabaseGroup {
+    return KeepassDatabaseGroup{
+        Name: group.Name.clone(),
+        Groups: group.Groups.clone(),
+        Entries: group.Entries.clone(),
+    };
+}
+
+// XXX default parameter value for depth?
+fn dump_database(g: &KeepassDatabaseGroup, depth: u8) {
+    println!("{}{}", String::from("  ").repeat(depth as usize), g.Name);
+    for subgroup in &g.Groups {
+        dump_database(&subgroup, depth + 1);
+    }
+    for entry in &g.Entries {
+        let mut name = String::new();
+        let mut password = String::new();
+
+        for kv in &entry.KeyValues {
+            if kv.Key == "Title" {
+                name = kv.Value.clone();
+            }
+            if kv.Key == "Password" {
+                password = kv.Value.clone();
+            }
+        }
+
+        if name != "" && password != "" {
+            println!("{}  {} {}", String::from("  ").repeat(depth as usize), name, password);
+        }
     }
 }
 
@@ -356,7 +397,9 @@ fn main() {
     // XXX why doesn't this have to be `let mut f`?
     let f = File::open(filename).unwrap();
     // XXX defer f.close() ?
-    let keepass_db = load_database(f, password);
+    let keepass_db = load_database(f, password).unwrap();
+
+    dump_database(&keepass_db.Root, 0);
 
     println!("{:?}", keepass_db)
 }
