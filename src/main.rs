@@ -485,4 +485,100 @@ mod tests {
             _ => panic!("Expected BadMagicSignature, got {:?}", res),
         }
     }
+
+    #[test]
+    fn invalid_version() {
+        let mut f = File::open("one.kdbx").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+
+        buf[10] = 4;
+
+        let res = load_database(buf.as_slice(), String::from("abc123"));
+
+        match res {
+            Err(KeepassLoadError::BadFileVersion) => {},
+            _ => panic!("Expected BadFileVersion, got {:?}", res),
+        }
+    }
+
+    #[test]
+    fn invalid_cipher() {
+        let mut f = File::open("one.kdbx").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+
+        buf[15] += 1;
+
+        let res = load_database(buf.as_slice(), String::from("abc123"));
+
+        match res {
+            Err(KeepassLoadError::UnsupportedCipher) => {},
+            _ => panic!("Expected UnsupportedCipher, got {:?}", res),
+        }
+    }
+
+    #[test]
+    fn invalid_compression_algorithm() {
+        let mut f = File::open("one.kdbx").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+
+        buf[34] += 1;
+
+        let res = load_database(buf.as_slice(), String::from("abc123"));
+
+        match res {
+            Err(KeepassLoadError::UnsupportedCompressionAlgorithm) => {},
+            _ => panic!("Expected UnsupportedCompressionAlgorithm, got {:?}", res),
+        }
+    }
+
+    #[test]
+    fn invalid_stream_algorithm() {
+        let mut f = File::open("one.kdbx").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+
+        buf[211] += 1;
+
+        let res = load_database(buf.as_slice(), String::from("abc123"));
+
+        match res {
+            Err(KeepassLoadError::UnsupportedStreamAlgorithm) => {},
+            _ => panic!("Expected UnsupportedStreamAlgorithm, got {:?}", res),
+        }
+    }
+
+    #[test]
+    fn stream_start_mismatch() {
+        let mut f = File::open("one.kdbx").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+
+        buf[176] += 1;
+
+        let res = load_database(buf.as_slice(), String::from("abc123"));
+
+        match res {
+            Err(KeepassLoadError::StreamStartMismatch) => {},
+            _ => panic!("Expected StreamStartMismatch, got {:?}", res),
+        }
+    }
+
+    #[test]
+    fn invalid_final_hash() {
+        let mut f = File::open("one.kdbx").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+
+        buf[1885] += 1;
+
+        let res = load_database(buf.as_slice(), String::from("abc123"));
+
+        match res {
+            Err(KeepassLoadError::InvalidFinalHash) => {},
+            _ => panic!("Expected InvalidFinalHash, got {:?}", res),
+        }
+    }
 }
