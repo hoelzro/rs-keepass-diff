@@ -91,41 +91,46 @@ impl TryFrom<u8> for FieldID {
 }
 
 #[derive(Clone, Deserialize, Debug)]
+#[serde(rename_all = "PascalCase")]
 struct KeeValuePair {
-    Key: String,
-    Value: String,
+    key: String,
+    value: String,
 }
 
 #[derive(Clone, Deserialize, Debug, Default)]
+#[serde(rename_all = "PascalCase")]
 struct KeepassDatabaseEntryHistory {
     #[serde(rename = "Entry", default)]
-    Entries: Vec<KeepassDatabaseEntry>,
+    entries: Vec<KeepassDatabaseEntry>,
 }
 
 #[derive(Clone, Deserialize, Debug)]
+#[serde(rename_all = "PascalCase")]
 struct KeepassDatabaseEntry {
     #[serde(rename = "String")]
-    KeyValues: Vec<KeeValuePair>,
+    key_values: Vec<KeeValuePair>,
 
     #[serde(default)]
-    History: KeepassDatabaseEntryHistory,
+    history: KeepassDatabaseEntryHistory,
 }
 
 #[derive(Clone, Deserialize, Debug)]
+#[serde(rename_all = "PascalCase")]
 struct KeepassDatabaseGroup {
     #[serde(default)]
-    Name: String,
+    name: String,
 
     #[serde(rename = "Group", default)]
-    Groups: Vec<KeepassDatabaseGroup>,
+    groups: Vec<KeepassDatabaseGroup>,
 
     #[serde(rename = "Entry", default)]
-    Entries: Vec<KeepassDatabaseEntry>,
+    entries: Vec<KeepassDatabaseEntry>,
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(rename_all = "PascalCase")]
 struct KeepassDatabase {
-    Root: KeepassDatabaseGroup
+    root: KeepassDatabaseGroup
 }
 
 // XXX make it a Read or something
@@ -322,7 +327,7 @@ fn load_database(mut db_file: File, password: String) -> Result<KeepassDatabase,
     loop {
         let mut buf = [0u8; 4];
         remaining_plaintext.read_exact(&mut buf).unwrap();
-        let block_id = u32::from_le_bytes(buf);
+        let _block_id = u32::from_le_bytes(buf);
 
         let mut block_hash = [0u8; 32];
         remaining_plaintext.read_exact(&mut block_hash).unwrap();
@@ -359,37 +364,37 @@ fn load_database(mut db_file: File, password: String) -> Result<KeepassDatabase,
         };
 
         let mut password_decryptor = Salsa20::new(&password_decryption_key, &KEEPASS_IV);
-        return Ok(KeepassDatabase{Root: decrypt_passwords(&mut db.Root, &mut password_decryptor)});
+        return Ok(KeepassDatabase{root: decrypt_passwords(&mut db.root, &mut password_decryptor)});
     }
 }
 
 // XXX remove &mut for the group after you've fixed that
 fn decrypt_passwords(group: &mut KeepassDatabaseGroup, password_decryptor: &mut Salsa20) -> KeepassDatabaseGroup {
-    let mut new_groups = Vec::with_capacity(group.Groups.len());
-    for subgroup in &mut group.Groups {
+    let mut new_groups = Vec::with_capacity(group.groups.len());
+    for subgroup in &mut group.groups {
         new_groups.push(decrypt_passwords(subgroup, password_decryptor));
     }
 
-    let mut new_entries = Vec::with_capacity(group.Entries.len());
+    let mut new_entries = Vec::with_capacity(group.entries.len());
     // XXX I'm overwriting shit for now - whatever at the moment
-    for entry in &mut group.Entries {
-        for kv in &mut entry.KeyValues {
+    for entry in &mut group.entries {
+        for kv in &mut entry.key_values {
             // XXX properly detecting the Protected attribute would be the right move here
-            if kv.Key == "Password" {
-                let ciphertext = base64::decode(kv.Value.as_bytes()).unwrap();
+            if kv.key == "Password" {
+                let ciphertext = base64::decode(kv.value.as_bytes()).unwrap();
                 let mut password_buf = Vec::with_capacity(ciphertext.len());
                 password_buf.resize(ciphertext.len(), 0);
 
                 password_decryptor.process(ciphertext.as_slice(), password_buf.as_mut_slice());
-                kv.Value = String::from_utf8(password_buf).unwrap();
+                kv.value = String::from_utf8(password_buf).unwrap();
             }
         }
 
         // process history just to thread the salsa20 state through
-        for history_entry in &entry.History.Entries {
-            for kv in &history_entry.KeyValues {
-                if kv.Key == "Password" {
-                    let ciphertext = base64::decode(kv.Value.as_bytes()).unwrap();
+        for history_entry in &entry.history.entries {
+            for kv in &history_entry.key_values {
+                if kv.key == "Password" {
+                    let ciphertext = base64::decode(kv.value.as_bytes()).unwrap();
                     let mut password_buf = Vec::with_capacity(ciphertext.len());
                     password_buf.resize(ciphertext.len(), 0);
 
@@ -402,28 +407,28 @@ fn decrypt_passwords(group: &mut KeepassDatabaseGroup, password_decryptor: &mut 
     }
 
     return KeepassDatabaseGroup{
-        Name: group.Name.clone(),
-        Groups: new_groups,
-        Entries: new_entries,
+        name: group.name.clone(),
+        groups: new_groups,
+        entries: new_entries,
     };
 }
 
 // XXX default parameter value for depth?
 fn dump_database(g: &KeepassDatabaseGroup, depth: u8) {
-    println!("{}{}", String::from("  ").repeat(depth as usize), g.Name);
-    for subgroup in &g.Groups {
+    println!("{}{}", String::from("  ").repeat(depth as usize), g.name);
+    for subgroup in &g.groups {
         dump_database(&subgroup, depth + 1);
     }
-    for entry in &g.Entries {
+    for entry in &g.entries {
         let mut name = String::new();
         let mut password = String::new();
 
-        for kv in &entry.KeyValues {
-            if kv.Key == "Title" {
-                name = kv.Value.clone();
+        for kv in &entry.key_values {
+            if kv.key == "Title" {
+                name = kv.value.clone();
             }
-            if kv.Key == "Password" {
-                password = kv.Value.clone();
+            if kv.key == "Password" {
+                password = kv.value.clone();
             }
         }
 
@@ -450,7 +455,7 @@ fn main() {
     // XXX defer f.close() ?
     let keepass_db = load_database(f, password).unwrap();
 
-    dump_database(&keepass_db.Root, 0);
+    dump_database(&keepass_db.root, 0);
 
     println!("{:?}", keepass_db)
 }
