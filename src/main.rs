@@ -462,11 +462,27 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use std::fs::File;
-    use crate::load_database;
+    use crate::*;
 
     #[test]
     fn valid_kdbx_file() {
         let f = File::open("one.kdbx").unwrap();
         let _ = load_database(f, String::from("abc123")).unwrap();
+    }
+
+    #[test]
+    fn invalid_magic_signature() {
+        let mut f = File::open("one.kdbx").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+
+        buf[0] += 1;
+
+        let res = load_database(buf.as_slice(), String::from("abc123"));
+
+        match res {
+            Err(KeepassLoadError::BadMagicSignature) => {},
+            _ => panic!("Expected BadMagicSignature, got {:?}", res),
+        }
     }
 }
