@@ -13,6 +13,8 @@ use crypto::sha2::Sha256;
 
 use flate2::read::GzDecoder;
 
+use serde::Deserialize;
+
 const MAGIC_SIGNATURE_1: u32 = 0x9AA2D903;
 const MAGIC_SIGNATURE_2: u32 = 0xB54BFB67;
 const FILE_VERSION_CRITICAL_MASK: u32 = 0xFFFF0000;
@@ -42,16 +44,6 @@ enum KeepassLoadError {
     StreamStartMismatch,
     InvalidFinalHash,
     Unimplemented,
-}
-
-#[derive(Debug)]
-struct KeepassDatabase {
-    master_seed: [u8; 32],
-    transform_seed: [u8; 32],
-    encryption_iv: [u8; 16], // XXX I think the size depends on the cipher algorithm
-    transform_rounds: u64,
-    protected_stream_key: [u8; 32],
-    stream_start_bytes: [u8; 32],
 }
 
 enum FieldID {
@@ -92,6 +84,35 @@ impl TryFrom<u8> for FieldID {
             _ => Err(()),
         }
     }
+}
+
+#[derive(Deserialize, Debug)]
+struct KeeValuePair {
+    Key: String,
+    Value: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct KeepassDatabaseEntry {
+    #[serde(rename = "String")]
+    KeyValues: Vec<KeeValuePair>,
+}
+
+#[derive(Deserialize, Debug)]
+struct KeepassDatabaseGroup {
+    #[serde(default)]
+    Name: String,
+
+    #[serde(rename = "Group", default)]
+    Groups: Vec<KeepassDatabaseGroup>,
+
+    #[serde(rename = "Entry", default)]
+    Entries: Vec<KeepassDatabaseEntry>,
+}
+
+#[derive(Deserialize, Debug)]
+struct KeepassDatabase {
+    Root: KeepassDatabaseGroup
 }
 
 // XXX make it a Read or something
@@ -301,7 +322,7 @@ fn load_database(mut db_file: File, password: String) -> Result<KeepassDatabase,
                 return Err(KeepassLoadError::InvalidFinalHash);
             }
 
-            break;
+            panic!("premature EOF");
         }
 
         // XXX I like the idea of a block returning an immutable variable for this...
@@ -314,17 +335,10 @@ fn load_database(mut db_file: File, password: String) -> Result<KeepassDatabase,
         let mut uncompressed = String::new();
         gunzip.read_to_string(&mut uncompressed).unwrap();
 
-        println!("{:?}", uncompressed);
-    }
+        let db: KeepassDatabase = quick_xml::de::from_str(&uncompressed).unwrap();
 
-    Ok(KeepassDatabase{
-        master_seed: master_seed.try_into().unwrap(),
-        transform_seed: transform_seed.try_into().unwrap(),
-        encryption_iv: encryption_iv.try_into().unwrap(),
-        transform_rounds: transform_rounds,
-        protected_stream_key: protected_stream_key.try_into().unwrap(),
-        stream_start_bytes: stream_start_bytes.try_into().unwrap(),
-    })
+        return Ok(db);
+    }
 }
 
 fn main() {
