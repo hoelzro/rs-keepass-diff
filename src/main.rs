@@ -9,7 +9,9 @@ use crypto::aes;
 use crypto::buffer::{BufferResult, RefReadBuffer, RefWriteBuffer, ReadBuffer, WriteBuffer};
 use crypto::blockmodes;
 use crypto::digest::Digest;
+use crypto::salsa20::Salsa20;
 use crypto::sha2::Sha256;
+use crypto::symmetriccipher::SynchronousStreamCipher;
 
 use flate2::read::GzDecoder;
 
@@ -27,6 +29,8 @@ const STREAM_ALGORITHM_ARC_FOUR_VARIANT: u32 = 1;
 const STREAM_ALGORITHM_SALSA20: u32 = 2;
 #[allow(dead_code)]
 const STREAM_ALGORITHM_CHACHA20: u32 = 3;
+
+const KEEPASS_IV: [u8; 8] = [0xe8, 0x30, 0x09, 0x4b, 0x97, 0x20, 0x5d, 0x2a];
 
 // XXX break this out into its own file/module/library/package/crate/whatever
 fn read_password() -> String {
@@ -92,10 +96,19 @@ struct KeeValuePair {
     Value: String,
 }
 
+#[derive(Clone, Deserialize, Debug, Default)]
+struct KeepassDatabaseEntryHistory {
+    #[serde(rename = "Entry", default)]
+    Entries: Vec<KeepassDatabaseEntry>,
+}
+
 #[derive(Clone, Deserialize, Debug)]
 struct KeepassDatabaseEntry {
     #[serde(rename = "String")]
     KeyValues: Vec<KeeValuePair>,
+
+    #[serde(default)]
+    History: KeepassDatabaseEntryHistory,
 }
 
 #[derive(Clone, Deserialize, Debug)]
@@ -335,7 +348,7 @@ fn load_database(mut db_file: File, password: String) -> Result<KeepassDatabase,
         let mut uncompressed = String::new();
         gunzip.read_to_string(&mut uncompressed).unwrap();
 
-        let db: KeepassDatabase = quick_xml::de::from_str(&uncompressed).unwrap();
+        let mut db: KeepassDatabase = quick_xml::de::from_str(&uncompressed).unwrap();
 
         let password_decryption_key = {
             let mut hasher = Sha256::new();
@@ -345,15 +358,53 @@ fn load_database(mut db_file: File, password: String) -> Result<KeepassDatabase,
             hash
         };
 
-        return Ok(KeepassDatabase{Root: decrypt_passwords(&db.Root, password_decryption_key)});
+        let mut password_decryptor = Salsa20::new(&password_decryption_key, &KEEPASS_IV);
+        return Ok(KeepassDatabase{Root: decrypt_passwords(&mut db.Root, &mut password_decryptor)});
     }
 }
 
-fn decrypt_passwords(group: &KeepassDatabaseGroup, key: [u8; 32]) -> KeepassDatabaseGroup {
+// XXX remove &mut for the group after you've fixed that
+fn decrypt_passwords(group: &mut KeepassDatabaseGroup, password_decryptor: &mut Salsa20) -> KeepassDatabaseGroup {
+    let mut new_groups = Vec::with_capacity(group.Groups.len());
+    for subgroup in &mut group.Groups {
+        new_groups.push(decrypt_passwords(subgroup, password_decryptor));
+    }
+
+    let mut new_entries = Vec::with_capacity(group.Entries.len());
+    // XXX I'm overwriting shit for now - whatever at the moment
+    for entry in &mut group.Entries {
+        for kv in &mut entry.KeyValues {
+            // XXX properly detecting the Protected attribute would be the right move here
+            if kv.Key == "Password" {
+                let ciphertext = base64::decode(kv.Value.as_bytes()).unwrap();
+                let mut password_buf = Vec::with_capacity(ciphertext.len());
+                password_buf.resize(ciphertext.len(), 0);
+
+                password_decryptor.process(ciphertext.as_slice(), password_buf.as_mut_slice());
+                kv.Value = String::from_utf8(password_buf).unwrap();
+            }
+        }
+
+        // process history just to thread the salsa20 state through
+        for history_entry in &entry.History.Entries {
+            for kv in &history_entry.KeyValues {
+                if kv.Key == "Password" {
+                    let ciphertext = base64::decode(kv.Value.as_bytes()).unwrap();
+                    let mut password_buf = Vec::with_capacity(ciphertext.len());
+                    password_buf.resize(ciphertext.len(), 0);
+
+                    password_decryptor.process(ciphertext.as_slice(), password_buf.as_mut_slice());
+                    // knowingly discard result
+                }
+            }
+        }
+        new_entries.push(entry.clone());
+    }
+
     return KeepassDatabaseGroup{
         Name: group.Name.clone(),
-        Groups: group.Groups.clone(),
-        Entries: group.Entries.clone(),
+        Groups: new_groups,
+        Entries: new_entries,
     };
 }
 
