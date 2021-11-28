@@ -133,8 +133,7 @@ struct KeepassDatabase {
     root: KeepassDatabaseGroup
 }
 
-// XXX make it a Read or something
-fn load_database(mut db_file: File, password: String) -> Result<KeepassDatabase, KeepassLoadError> {
+fn load_database(mut db_file: impl Read, password: String) -> Result<KeepassDatabase, KeepassLoadError> {
     let mut buf = [0u8; 4];
 
     // XXX there has to be a way to improve this
