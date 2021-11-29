@@ -565,4 +565,20 @@ mod tests {
             _ => panic!("Expected StreamStartMismatch, got {:?}", res),
         }
     }
+
+    #[test]
+    fn invalid_field_id() {
+        let mut f = File::open("one.kdbx").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+
+        buf[73] = 15;
+
+        let res = load_database(buf.as_slice(), String::from("abc123"));
+
+        match res {
+            Err(KeepassLoadError::StreamStartMismatch) => {},
+            _ => panic!("Expected StreamStartMismatch, got {:?}", res),
+        }
+    }
 }
