@@ -133,7 +133,7 @@ struct KeepassDatabase {
     root: KeepassDatabaseGroup
 }
 
-fn load_database(mut db_file: impl Read, password: String) -> Result<KeepassDatabase, KeepassLoadError> {
+fn validate_signature(mut db_file: impl Read) -> Result<(), KeepassLoadError> {
     let mut buf = [0u8; 4];
 
     // XXX there has to be a way to improve this
@@ -167,6 +167,25 @@ fn load_database(mut db_file: impl Read, password: String) -> Result<KeepassData
         return Err(KeepassLoadError::BadFileVersion);
     }
 
+    Ok(())
+}
+
+struct KeepassHeader {
+    // master_seed: [u8; 32],
+    // transform_seed: [u8; 32],
+    // encryption_iv: [u8; 32],
+    // protected_stream_key: [u8; 32],
+    // stream_start_bytes: [u8; 32],
+    master_seed: Vec<u8>,
+    transform_seed: Vec<u8>,
+    encryption_iv: Vec<u8>,
+    transform_rounds: u64,
+    protected_stream_key: Vec<u8>,
+    stream_start_bytes: Vec<u8>,
+}
+
+fn read_database_headers(mut db_file: impl Read) -> Result<KeepassHeader, KeepassLoadError> {
+    // XXX just use [u8; 32] and friends here?
     // XXX is using with_capacity actually helpful here?
     let mut master_seed = Vec::with_capacity(32);
     let mut transform_seed = Vec::with_capacity(32);
@@ -251,6 +270,17 @@ fn load_database(mut db_file: impl Read, password: String) -> Result<KeepassData
 
     // XXX verify we got all the fields
 
+    Ok(KeepassHeader{
+        transform_rounds,
+        master_seed,
+        protected_stream_key,
+        transform_seed,
+        encryption_iv,
+        stream_start_bytes,
+    })
+}
+
+fn compute_master_key(header: &KeepassHeader, password: String) -> Result<[u8; 32], KeepassLoadError> {
     let password_hash = {
         let mut hasher = Sha256::new();
         hasher.input_str(&password);
@@ -269,9 +299,9 @@ fn load_database(mut db_file: impl Read, password: String) -> Result<KeepassData
 
     let mut transformed_key = composite_key;
 
-    for _ in 0..transform_rounds {
+    for _ in 0..header.transform_rounds {
         // XXX do I really need to recreate this over and over?
-        let mut aes = aes::ecb_encryptor(aes::KeySize::KeySize256, &transform_seed, blockmodes::NoPadding);
+        let mut aes = aes::ecb_encryptor(aes::KeySize::KeySize256, &header.transform_seed, blockmodes::NoPadding);
         let mut this_rounds_output = [0u8; 32];
         aes.encrypt(&mut RefReadBuffer::new(&transformed_key), &mut RefWriteBuffer::new(&mut this_rounds_output), true).unwrap();
         transformed_key.copy_from_slice(&this_rounds_output);
@@ -287,15 +317,69 @@ fn load_database(mut db_file: impl Read, password: String) -> Result<KeepassData
 
     let master_key = {
         let mut hasher = Sha256::new();
-        hasher.input(&master_seed);
+        hasher.input(&header.master_seed);
         hasher.input(&transformed_key);
         let mut hash: [u8; 32] = [0; 32];
         hasher.result(&mut hash);
         hash
     };
 
-    // XXX I hate this reuse of aes
-    let mut aes = aes::cbc_decryptor(aes::KeySize::KeySize256, &master_key, &encryption_iv, blockmodes::NoPadding);
+    Ok(master_key)
+}
+
+fn read_database_blocks(header: &KeepassHeader, mut plaintext: impl Read) -> Result<KeepassDatabase, KeepassLoadError> {
+    loop {
+        let mut buf = [0u8; 4];
+        plaintext.read_exact(&mut buf).unwrap();
+        let _block_id = u32::from_le_bytes(buf);
+
+        let mut block_hash = [0u8; 32];
+        plaintext.read_exact(&mut block_hash).unwrap();
+
+        plaintext.read_exact(&mut buf).unwrap();
+        let block_size = u32::from_le_bytes(buf);
+
+        if block_size == 0 {
+            if block_hash != [0u8; 32] {
+                return Err(KeepassLoadError::InvalidFinalHash);
+            }
+
+            panic!("premature EOF");
+        }
+
+        // XXX I like the idea of a block returning an immutable variable for this...
+        let mut block_data = Vec::with_capacity(block_size as usize);
+        block_data.resize(block_size as usize, 0);
+
+        plaintext.read_exact(&mut block_data).unwrap();
+
+        let mut gunzip = GzDecoder::new(block_data.as_slice());
+        let mut uncompressed = String::new();
+        gunzip.read_to_string(&mut uncompressed).unwrap();
+
+        let mut db: KeepassDatabase = quick_xml::de::from_str(&uncompressed).unwrap();
+
+        let password_decryption_key = {
+            let mut hasher = Sha256::new();
+            hasher.input(&header.protected_stream_key);
+            let mut hash: [u8; 32] = [0; 32];
+            hasher.result(&mut hash);
+            hash
+        };
+
+        let mut password_decryptor = Salsa20::new(&password_decryption_key, &KEEPASS_IV);
+        return Ok(KeepassDatabase{root: decrypt_passwords(&mut db.root, &mut password_decryptor)});
+    }
+}
+
+fn load_database(mut db_file: impl Read, password: String) -> Result<KeepassDatabase, KeepassLoadError> {
+    validate_signature(&mut db_file)?;
+
+    let header = read_database_headers(&mut db_file)?;
+
+    let master_key = compute_master_key(&header, password)?;
+
+    let mut aes = aes::cbc_decryptor(aes::KeySize::KeySize256, &master_key, &header.encryption_iv, blockmodes::NoPadding);
 
     // XXX shitty error handling
     let mut cipher_text = Vec::new();
@@ -316,55 +400,14 @@ fn load_database(mut db_file: impl Read, password: String) -> Result<KeepassData
         }
     }
 
-    let first_block_plaintext = &plain_text[..stream_start_bytes.len()];
-    let mut remaining_plaintext = &plain_text[stream_start_bytes.len()..];
+    let first_block_plaintext = &plain_text[..header.stream_start_bytes.len()];
+    let mut remaining_plaintext = &plain_text[header.stream_start_bytes.len()..];
 
-    if first_block_plaintext != stream_start_bytes {
+    if first_block_plaintext != header.stream_start_bytes {
         return Err(KeepassLoadError::StreamStartMismatch);
     }
 
-    loop {
-        let mut buf = [0u8; 4];
-        remaining_plaintext.read_exact(&mut buf).unwrap();
-        let _block_id = u32::from_le_bytes(buf);
-
-        let mut block_hash = [0u8; 32];
-        remaining_plaintext.read_exact(&mut block_hash).unwrap();
-
-        remaining_plaintext.read_exact(&mut buf).unwrap();
-        let block_size = u32::from_le_bytes(buf);
-
-        if block_size == 0 {
-            if block_hash != [0u8; 32] {
-                return Err(KeepassLoadError::InvalidFinalHash);
-            }
-
-            panic!("premature EOF");
-        }
-
-        // XXX I like the idea of a block returning an immutable variable for this...
-        let mut block_data = Vec::with_capacity(block_size as usize);
-        block_data.resize(block_size as usize, 0);
-
-        remaining_plaintext.read_exact(&mut block_data).unwrap();
-
-        let mut gunzip = GzDecoder::new(block_data.as_slice());
-        let mut uncompressed = String::new();
-        gunzip.read_to_string(&mut uncompressed).unwrap();
-
-        let mut db: KeepassDatabase = quick_xml::de::from_str(&uncompressed).unwrap();
-
-        let password_decryption_key = {
-            let mut hasher = Sha256::new();
-            hasher.input(&protected_stream_key);
-            let mut hash: [u8; 32] = [0; 32];
-            hasher.result(&mut hash);
-            hash
-        };
-
-        let mut password_decryptor = Salsa20::new(&password_decryption_key, &KEEPASS_IV);
-        return Ok(KeepassDatabase{root: decrypt_passwords(&mut db.root, &mut password_decryptor)});
-    }
+    read_database_blocks(&header, &mut remaining_plaintext)
 }
 
 // XXX remove &mut for the group after you've fixed that
