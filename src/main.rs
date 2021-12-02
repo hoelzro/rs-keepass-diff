@@ -142,10 +142,7 @@ struct KeepassDatabase {
 fn validate_signature(mut db_file: impl Read) -> Result<(), KeepassLoadError> {
     let mut buf = [0u8; 4];
 
-    // XXX there has to be a way to improve this
-    if let Err(err) = db_file.read_exact(&mut buf) {
-        return Err(KeepassLoadError::IO(err))
-    }
+    db_file.read_exact(&mut buf)?;
 
     let magic1 = u32::from_le_bytes(buf);
 
@@ -153,9 +150,7 @@ fn validate_signature(mut db_file: impl Read) -> Result<(), KeepassLoadError> {
         return Err(KeepassLoadError::BadMagicSignature);
     }
 
-    if let Err(err) = db_file.read_exact(&mut buf) {
-        return Err(KeepassLoadError::IO(err))
-    }
+    db_file.read_exact(&mut buf)?;
 
     let magic2 = u32::from_le_bytes(buf);
 
@@ -163,9 +158,7 @@ fn validate_signature(mut db_file: impl Read) -> Result<(), KeepassLoadError> {
         return Err(KeepassLoadError::BadMagicSignature);
     }
 
-    if let Err(err) = db_file.read_exact(&mut buf) {
-        return Err(KeepassLoadError::IO(err))
-    }
+    db_file.read_exact(&mut buf)?;
 
     let version = u32::from_le_bytes(buf) & FILE_VERSION_CRITICAL_MASK;
 
@@ -203,9 +196,7 @@ fn read_database_headers(mut db_file: impl Read) -> Result<KeepassHeader, Keepas
     loop {
         let mut buf = [0u8; 3];
 
-        if let Err(err) = db_file.read_exact(&mut buf[0..]) {
-            return Err(KeepassLoadError::IO(err))
-        }
+        db_file.read_exact(&mut buf)?;
 
         let field_id: FieldID = buf[0].try_into().unwrap(); // XXX don't unwrap!
         let field_length = u16::from_le_bytes(buf[1..3].try_into().unwrap()); // XXX this feels...wrong
@@ -214,9 +205,7 @@ fn read_database_headers(mut db_file: impl Read) -> Result<KeepassHeader, Keepas
         let mut field_data = Vec::with_capacity(field_length.into());
         field_data.resize(field_length.into(), 0);
 
-        if let Err(err) = db_file.read_exact(field_data.as_mut_slice()) {
-            return Err(KeepassLoadError::IO(err))
-        }
+        db_file.read_exact(field_data.as_mut_slice())?;
 
         match field_id {
             FieldID::EndOfHeader => {
@@ -336,13 +325,13 @@ fn compute_master_key(header: &KeepassHeader, password: String) -> Result<[u8; 3
 fn read_database_blocks(header: &KeepassHeader, mut plaintext: impl Read) -> Result<KeepassDatabase, KeepassLoadError> {
     loop {
         let mut buf = [0u8; 4];
-        plaintext.read_exact(&mut buf).unwrap();
+        plaintext.read_exact(&mut buf)?;
         let _block_id = u32::from_le_bytes(buf);
 
         let mut block_hash = [0u8; 32];
-        plaintext.read_exact(&mut block_hash).unwrap();
+        plaintext.read_exact(&mut block_hash)?;
 
-        plaintext.read_exact(&mut buf).unwrap();
+        plaintext.read_exact(&mut buf)?;
         let block_size = u32::from_le_bytes(buf);
 
         if block_size == 0 {
@@ -357,11 +346,11 @@ fn read_database_blocks(header: &KeepassHeader, mut plaintext: impl Read) -> Res
         let mut block_data = Vec::with_capacity(block_size as usize);
         block_data.resize(block_size as usize, 0);
 
-        plaintext.read_exact(&mut block_data).unwrap();
+        plaintext.read_exact(&mut block_data)?;
 
         let mut gunzip = GzDecoder::new(block_data.as_slice());
         let mut uncompressed = String::new();
-        gunzip.read_to_string(&mut uncompressed).unwrap();
+        gunzip.read_to_string(&mut uncompressed)?;
 
         let mut db: KeepassDatabase = quick_xml::de::from_str(&uncompressed).unwrap();
 
