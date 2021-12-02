@@ -50,6 +50,12 @@ enum KeepassLoadError {
     Unimplemented,
 }
 
+impl From<io::Error> for KeepassLoadError {
+    fn from(err: io::Error) -> KeepassLoadError {
+        KeepassLoadError::IO(err)
+    }
+}
+
 enum FieldID {
     EndOfHeader,
     Comment,
@@ -381,9 +387,8 @@ fn load_database(mut db_file: impl Read, password: String) -> Result<KeepassData
 
     let mut aes = aes::cbc_decryptor(aes::KeySize::KeySize256, &master_key, &header.encryption_iv, blockmodes::NoPadding);
 
-    // XXX shitty error handling
     let mut cipher_text = Vec::new();
-    db_file.read_to_end(&mut cipher_text).unwrap();
+    db_file.read_to_end(&mut cipher_text)?;
 
     let mut plain_text = Vec::new();
     let mut cipher_text_buffer = RefReadBuffer::new(&cipher_text);
