@@ -41,6 +41,9 @@ fn read_password() -> String {
 enum KeepassLoadError {
     IO(io::Error),
     CipherError(crypto::symmetriccipher::SymmetricCipherError),
+    XMLError(quick_xml::DeError),
+    Base64Error(base64::DecodeError),
+    UTF8Error(std::string::FromUtf8Error),
     BadMagicSignature,
     BadFileVersion,
     InvalidFieldID,
@@ -62,6 +65,24 @@ impl From<io::Error> for KeepassLoadError {
 impl From<crypto::symmetriccipher::SymmetricCipherError> for KeepassLoadError {
     fn from(err: crypto::symmetriccipher::SymmetricCipherError) -> KeepassLoadError {
         KeepassLoadError::CipherError(err)
+    }
+}
+
+impl From<quick_xml::DeError> for KeepassLoadError {
+    fn from(err: quick_xml::DeError) -> KeepassLoadError {
+        KeepassLoadError::XMLError(err)
+    }
+}
+
+impl From<base64::DecodeError> for KeepassLoadError {
+    fn from(err: base64::DecodeError) -> KeepassLoadError {
+        KeepassLoadError::Base64Error(err)
+    }
+}
+
+impl From<std::string::FromUtf8Error> for KeepassLoadError {
+    fn from(err: std::string::FromUtf8Error) -> KeepassLoadError {
+        KeepassLoadError::UTF8Error(err)
     }
 }
 
@@ -371,7 +392,7 @@ fn read_database_blocks(header: &KeepassHeader, mut plaintext: impl Read) -> Res
         let mut uncompressed = String::new();
         gunzip.read_to_string(&mut uncompressed)?;
 
-        let mut db: KeepassDatabase = quick_xml::de::from_str(&uncompressed).unwrap();
+        let mut db: KeepassDatabase = quick_xml::de::from_str(&uncompressed)?;
 
         let password_decryption_key = {
             let mut hasher = Sha256::new();
@@ -382,7 +403,7 @@ fn read_database_blocks(header: &KeepassHeader, mut plaintext: impl Read) -> Res
         };
 
         let mut password_decryptor = Salsa20::new(&password_decryption_key, &KEEPASS_IV);
-        return Ok(KeepassDatabase{root: decrypt_passwords(&mut db.root, &mut password_decryptor)});
+        return Ok(KeepassDatabase{root: decrypt_passwords(&mut db.root, &mut password_decryptor)?});
     }
 }
 
@@ -424,10 +445,10 @@ fn load_database(mut db_file: impl Read, password: String) -> Result<KeepassData
 }
 
 // XXX remove &mut for the group after you've fixed that
-fn decrypt_passwords(group: &mut KeepassDatabaseGroup, password_decryptor: &mut Salsa20) -> KeepassDatabaseGroup {
+fn decrypt_passwords(group: &mut KeepassDatabaseGroup, password_decryptor: &mut Salsa20) -> Result<KeepassDatabaseGroup, KeepassLoadError> {
     let mut new_groups = Vec::with_capacity(group.groups.len());
     for subgroup in &mut group.groups {
-        new_groups.push(decrypt_passwords(subgroup, password_decryptor));
+        new_groups.push(decrypt_passwords(subgroup, password_decryptor)?);
     }
 
     let mut new_entries = Vec::with_capacity(group.entries.len());
@@ -436,11 +457,11 @@ fn decrypt_passwords(group: &mut KeepassDatabaseGroup, password_decryptor: &mut 
         for kv in &mut entry.key_values {
             // XXX properly detecting the Protected attribute would be the right move here
             if kv.key == "Password" {
-                let ciphertext = base64::decode(kv.value.as_bytes()).unwrap();
+                let ciphertext = base64::decode(kv.value.as_bytes())?;
                 let mut password_buf = vec![0; ciphertext.len()];
 
                 password_decryptor.process(ciphertext.as_slice(), password_buf.as_mut_slice());
-                kv.value = String::from_utf8(password_buf).unwrap();
+                kv.value = String::from_utf8(password_buf)?;
             }
         }
 
@@ -448,7 +469,7 @@ fn decrypt_passwords(group: &mut KeepassDatabaseGroup, password_decryptor: &mut 
         for history_entry in &entry.history.entries {
             for kv in &history_entry.key_values {
                 if kv.key == "Password" {
-                    let ciphertext = base64::decode(kv.value.as_bytes()).unwrap();
+                    let ciphertext = base64::decode(kv.value.as_bytes())?;
                     let mut password_buf = vec![0; ciphertext.len()];
 
                     password_decryptor.process(ciphertext.as_slice(), password_buf.as_mut_slice());
@@ -459,11 +480,11 @@ fn decrypt_passwords(group: &mut KeepassDatabaseGroup, password_decryptor: &mut 
         new_entries.push(entry.clone());
     }
 
-    return KeepassDatabaseGroup{
+    Ok(KeepassDatabaseGroup{
         name: group.name.clone(),
         groups: new_groups,
         entries: new_entries,
-    };
+    })
 }
 
 // XXX default parameter value for depth?
