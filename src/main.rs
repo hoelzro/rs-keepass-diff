@@ -205,9 +205,7 @@ fn read_database_headers(mut db_file: impl Read) -> Result<KeepassHeader, Keepas
         let field_id: FieldID = field_id_buf[0].try_into()?;
         let field_length = u16::from_le_bytes(field_length_buf);
 
-        // XXX shorthand for combining these two?
-        let mut field_data = Vec::with_capacity(field_length.into());
-        field_data.resize(field_length.into(), 0);
+        let mut field_data = vec![0; field_length.into()];
 
         db_file.read_exact(field_data.as_mut_slice())?;
 
@@ -358,8 +356,7 @@ fn read_database_blocks(header: &KeepassHeader, mut plaintext: impl Read) -> Res
         }
 
         // XXX I like the idea of a block returning an immutable variable for this...
-        let mut block_data = Vec::with_capacity(block_size as usize);
-        block_data.resize(block_size as usize, 0);
+        let mut block_data = vec![0; block_size as usize];
 
         plaintext.read_exact(&mut block_data)?;
 
@@ -433,8 +430,7 @@ fn decrypt_passwords(group: &mut KeepassDatabaseGroup, password_decryptor: &mut 
             // XXX properly detecting the Protected attribute would be the right move here
             if kv.key == "Password" {
                 let ciphertext = base64::decode(kv.value.as_bytes()).unwrap();
-                let mut password_buf = Vec::with_capacity(ciphertext.len());
-                password_buf.resize(ciphertext.len(), 0);
+                let mut password_buf = vec![0; ciphertext.len()];
 
                 password_decryptor.process(ciphertext.as_slice(), password_buf.as_mut_slice());
                 kv.value = String::from_utf8(password_buf).unwrap();
@@ -446,8 +442,7 @@ fn decrypt_passwords(group: &mut KeepassDatabaseGroup, password_decryptor: &mut 
             for kv in &history_entry.key_values {
                 if kv.key == "Password" {
                     let ciphertext = base64::decode(kv.value.as_bytes()).unwrap();
-                    let mut password_buf = Vec::with_capacity(ciphertext.len());
-                    password_buf.resize(ciphertext.len(), 0);
+                    let mut password_buf = vec![0; ciphertext.len()];
 
                     password_decryptor.process(ciphertext.as_slice(), password_buf.as_mut_slice());
                     // knowingly discard result
