@@ -42,6 +42,8 @@ enum KeepassLoadError {
     IO(io::Error),
     BadMagicSignature,
     BadFileVersion,
+    InvalidFieldID,
+    InvalidFieldLength,
     UnsupportedCipher,
     UnsupportedCompressionAlgorithm,
     UnsupportedStreamAlgorithm,
@@ -73,7 +75,7 @@ enum FieldID {
 }
 
 impl TryFrom<u8> for FieldID {
-    type Error = ();
+    type Error = KeepassLoadError;
 
     fn try_from(v: u8) -> Result<Self, Self::Error> {
         match v {
@@ -91,7 +93,7 @@ impl TryFrom<u8> for FieldID {
             11 => Ok(FieldID::KdfParameters),
             12 => Ok(FieldID::PublicCustomData),
 
-            _ => Err(()),
+            _ => Err(KeepassLoadError::InvalidFieldID),
         }
     }
 }
@@ -194,12 +196,14 @@ fn read_database_headers(mut db_file: impl Read) -> Result<KeepassHeader, Keepas
     let mut stream_start_bytes = Vec::with_capacity(32);
 
     loop {
-        let mut buf = [0u8; 3];
+        let mut field_id_buf = [0u8; 1];
+        let mut field_length_buf = [0u8; 2];
 
-        db_file.read_exact(&mut buf)?;
+        db_file.read_exact(&mut field_id_buf)?;
+        db_file.read_exact(&mut field_length_buf)?;
 
-        let field_id: FieldID = buf[0].try_into().unwrap(); // XXX don't unwrap!
-        let field_length = u16::from_le_bytes(buf[1..3].try_into().unwrap()); // XXX this feels...wrong
+        let field_id: FieldID = field_id_buf[0].try_into()?;
+        let field_length = u16::from_le_bytes(field_length_buf);
 
         // XXX shorthand for combining these two?
         let mut field_data = Vec::with_capacity(field_length.into());
@@ -217,35 +221,46 @@ fn read_database_headers(mut db_file: impl Read) -> Result<KeepassHeader, Keepas
                 }
             },
             FieldID::CompressionFlags => {
-                let compression_algorithm = u32::from_le_bytes(field_data.try_into().unwrap());
+                let compression_algorithm = u32::from_le_bytes(field_data.try_into().map_err(|_| KeepassLoadError::InvalidFieldLength)?);
                 if compression_algorithm != COMPRESSION_ALGORITHM_GZIP {
                     return Err(KeepassLoadError::UnsupportedCompressionAlgorithm);
                 }
             },
             FieldID::MasterSeed => {
-                // XXX check field length
+                if field_data.len() != 32 {
+                    return Err(KeepassLoadError::InvalidFieldLength);
+                }
                 master_seed = field_data;
             },
             FieldID::TransformSeed => {
-                // XXX check field length
+                if field_data.len() != 32 {
+                    return Err(KeepassLoadError::InvalidFieldLength);
+                }
                 transform_seed = field_data;
             },
             FieldID::TransformRounds => {
-                transform_rounds = u64::from_le_bytes(field_data.try_into().unwrap());
+                transform_rounds = u64::from_le_bytes(field_data.try_into().map_err(|_| KeepassLoadError::InvalidFieldLength)?);
             },
             FieldID::EncryptionIV => {
+                if field_data.len() != 16 {
+                    return Err(KeepassLoadError::InvalidFieldLength);
+                }
                 encryption_iv = field_data;
             },
             FieldID::ProtectedStreamKey => {
-                // XXX check field length
+                if field_data.len() != 32 {
+                    return Err(KeepassLoadError::InvalidFieldLength);
+                }
                 protected_stream_key = field_data;
             },
             FieldID::StreamStartBytes => {
-                // XXX check field length
+                if field_data.len() != 32 {
+                    return Err(KeepassLoadError::InvalidFieldLength);
+                }
                 stream_start_bytes = field_data;
             },
             FieldID::InnerRandomStreamID => {
-                let stream_id = u32::from_le_bytes(field_data.try_into().unwrap());
+                let stream_id = u32::from_le_bytes(field_data.try_into().map_err(|_| KeepassLoadError::InvalidFieldLength)?);
                 if stream_id != STREAM_ALGORITHM_SALSA20 {
                     return Err(KeepassLoadError::UnsupportedStreamAlgorithm);
                 }
@@ -614,8 +629,8 @@ mod tests {
         let res = load_database(buf.as_slice(), String::from("abc123"));
 
         match res {
-            Err(KeepassLoadError::StreamStartMismatch) => {},
-            _ => panic!("Expected StreamStartMismatch, got {:?}", res),
+            Err(KeepassLoadError::InvalidFieldID) => {},
+            _ => panic!("Expected InvalidFieldID, got {:?}", res),
         }
     }
 }
