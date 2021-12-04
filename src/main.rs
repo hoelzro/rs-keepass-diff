@@ -40,6 +40,7 @@ fn read_password() -> String {
 #[derive(Debug)]
 enum KeepassLoadError {
     IO(io::Error),
+    CipherError(crypto::symmetriccipher::SymmetricCipherError),
     BadMagicSignature,
     BadFileVersion,
     InvalidFieldID,
@@ -55,6 +56,12 @@ enum KeepassLoadError {
 impl From<io::Error> for KeepassLoadError {
     fn from(err: io::Error) -> KeepassLoadError {
         KeepassLoadError::IO(err)
+    }
+}
+
+impl From<crypto::symmetriccipher::SymmetricCipherError> for KeepassLoadError {
+    fn from(err: crypto::symmetriccipher::SymmetricCipherError) -> KeepassLoadError {
+        KeepassLoadError::CipherError(err)
     }
 }
 
@@ -311,7 +318,7 @@ fn compute_master_key(header: &KeepassHeader, password: String) -> Result<[u8; 3
         // XXX do I really need to recreate this over and over?
         let mut aes = aes::ecb_encryptor(aes::KeySize::KeySize256, &header.transform_seed, blockmodes::NoPadding);
         let mut this_rounds_output = [0u8; 32];
-        aes.encrypt(&mut RefReadBuffer::new(&transformed_key), &mut RefWriteBuffer::new(&mut this_rounds_output), true).unwrap();
+        aes.encrypt(&mut RefReadBuffer::new(&transformed_key), &mut RefWriteBuffer::new(&mut this_rounds_output), true)?;
         transformed_key.copy_from_slice(&this_rounds_output);
     }
 
@@ -397,7 +404,7 @@ fn load_database(mut db_file: impl Read, password: String) -> Result<KeepassData
     let mut plain_text_buffer = RefWriteBuffer::new(&mut work_space);
 
     loop {
-        let res = aes.decrypt(&mut cipher_text_buffer, &mut plain_text_buffer, true).unwrap();
+        let res = aes.decrypt(&mut cipher_text_buffer, &mut plain_text_buffer, true)?;
         plain_text.extend(plain_text_buffer.take_read_buffer().take_remaining().iter().map(|&i| i));
 
         match res {
