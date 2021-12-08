@@ -1,9 +1,16 @@
-use std::convert::{TryFrom, TryInto};
 use std::env;
-use std::io;
-use std::io::Read;
 use std::fs::File;
 use std::process;
+
+// XXX break this out into its own file/module/library/package/crate/whatever
+fn read_password() -> String {
+    "abc123".to_string()
+}
+
+mod kdbx {
+
+use std::io;
+use std::convert::{TryFrom, TryInto};
 
 use crypto::aes;
 use crypto::buffer::{BufferResult, RefReadBuffer, RefWriteBuffer, ReadBuffer, WriteBuffer};
@@ -16,6 +23,7 @@ use crypto::symmetriccipher::SynchronousStreamCipher;
 use flate2::read::GzDecoder;
 
 use serde::Deserialize;
+use std::io::Read;
 
 const MAGIC_SIGNATURE_1: u32 = 0x9AA2D903;
 const MAGIC_SIGNATURE_2: u32 = 0xB54BFB67;
@@ -32,13 +40,8 @@ const STREAM_ALGORITHM_CHACHA20: u32 = 3;
 
 const KEEPASS_IV: [u8; 8] = [0xe8, 0x30, 0x09, 0x4b, 0x97, 0x20, 0x5d, 0x2a];
 
-// XXX break this out into its own file/module/library/package/crate/whatever
-fn read_password() -> String {
-    "abc123".to_string()
-}
-
 #[derive(Debug)]
-enum KeepassLoadError {
+pub enum KeepassLoadError {
     IO(io::Error),
     CipherError(crypto::symmetriccipher::SymmetricCipherError),
     XMLError(quick_xml::DeError),
@@ -128,45 +131,45 @@ impl TryFrom<u8> for FieldID {
 
 #[derive(Clone, Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
-struct KeeValuePair {
-    key: String,
-    value: String,
+pub struct KeeValuePair {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Clone, Deserialize, Debug, Default)]
 #[serde(rename_all = "PascalCase")]
-struct KeepassDatabaseEntryHistory {
+pub struct KeepassDatabaseEntryHistory {
     #[serde(rename = "Entry", default)]
-    entries: Vec<KeepassDatabaseEntry>,
+    pub entries: Vec<KeepassDatabaseEntry>,
 }
 
 #[derive(Clone, Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
-struct KeepassDatabaseEntry {
+pub struct KeepassDatabaseEntry {
     #[serde(rename = "String")]
-    key_values: Vec<KeeValuePair>,
+    pub key_values: Vec<KeeValuePair>,
 
     #[serde(default)]
-    history: KeepassDatabaseEntryHistory,
+    pub history: KeepassDatabaseEntryHistory,
 }
 
 #[derive(Clone, Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
-struct KeepassDatabaseGroup {
+pub struct KeepassDatabaseGroup {
     #[serde(default)]
-    name: String,
+    pub name: String,
 
     #[serde(rename = "Group", default)]
-    groups: Vec<KeepassDatabaseGroup>,
+    pub groups: Vec<KeepassDatabaseGroup>,
 
     #[serde(rename = "Entry", default)]
-    entries: Vec<KeepassDatabaseEntry>,
+    pub entries: Vec<KeepassDatabaseEntry>,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
-struct KeepassDatabase {
-    root: KeepassDatabaseGroup
+pub struct KeepassDatabase {
+    pub root: KeepassDatabaseGroup
 }
 
 fn validate_signature(mut db_file: impl Read) -> Result<(), KeepassLoadError> {
@@ -407,7 +410,7 @@ fn read_database_blocks(header: &KeepassHeader, mut plaintext: impl Read) -> Res
     }
 }
 
-fn load_database(mut db_file: impl Read, password: String) -> Result<KeepassDatabase, KeepassLoadError> {
+pub fn load_database(mut db_file: impl Read, password: String) -> Result<KeepassDatabase, KeepassLoadError> {
     validate_signature(&mut db_file)?;
 
     let header = read_database_headers(&mut db_file)?;
@@ -487,8 +490,10 @@ fn decrypt_passwords(group: &mut KeepassDatabaseGroup, password_decryptor: &mut 
     })
 }
 
+}
+
 // XXX default parameter value for depth?
-fn dump_database(g: &KeepassDatabaseGroup, depth: u8) {
+fn dump_database(g: &kdbx::KeepassDatabaseGroup, depth: u8) {
     println!("{}{}", String::from("  ").repeat(depth as usize), g.name);
     for subgroup in &g.groups {
         dump_database(&subgroup, depth + 1);
@@ -527,7 +532,7 @@ fn main() {
     // XXX why doesn't this have to be `let mut f`?
     let f = File::open(filename).unwrap();
     // XXX defer f.close() ?
-    let keepass_db = load_database(f, password).unwrap();
+    let keepass_db = kdbx::load_database(f, password).unwrap();
 
     dump_database(&keepass_db.root, 0);
 
@@ -537,12 +542,14 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use std::fs::File;
-    use crate::*;
+    use std::io::Read;
+    
+    use crate::kdbx::{self, KeepassLoadError};
 
     #[test]
     fn valid_kdbx_file() {
         let f = File::open("one.kdbx").unwrap();
-        let _ = load_database(f, String::from("abc123")).unwrap();
+        let _ = kdbx::load_database(f, String::from("abc123")).unwrap();
     }
 
     #[test]
@@ -553,7 +560,7 @@ mod tests {
 
         buf[0] += 1;
 
-        let res = load_database(buf.as_slice(), String::from("abc123"));
+        let res = kdbx::load_database(buf.as_slice(), String::from("abc123"));
 
         match res {
             Err(KeepassLoadError::BadMagicSignature) => {},
@@ -569,7 +576,7 @@ mod tests {
 
         buf[10] = 4;
 
-        let res = load_database(buf.as_slice(), String::from("abc123"));
+        let res = kdbx::load_database(buf.as_slice(), String::from("abc123"));
 
         match res {
             Err(KeepassLoadError::BadFileVersion) => {},
@@ -585,7 +592,7 @@ mod tests {
 
         buf[15] += 1;
 
-        let res = load_database(buf.as_slice(), String::from("abc123"));
+        let res = kdbx::load_database(buf.as_slice(), String::from("abc123"));
 
         match res {
             Err(KeepassLoadError::UnsupportedCipher) => {},
@@ -601,7 +608,7 @@ mod tests {
 
         buf[34] += 1;
 
-        let res = load_database(buf.as_slice(), String::from("abc123"));
+        let res = kdbx::load_database(buf.as_slice(), String::from("abc123"));
 
         match res {
             Err(KeepassLoadError::UnsupportedCompressionAlgorithm) => {},
@@ -617,7 +624,7 @@ mod tests {
 
         buf[211] += 1;
 
-        let res = load_database(buf.as_slice(), String::from("abc123"));
+        let res = kdbx::load_database(buf.as_slice(), String::from("abc123"));
 
         match res {
             Err(KeepassLoadError::UnsupportedStreamAlgorithm) => {},
@@ -633,7 +640,7 @@ mod tests {
 
         buf[176] += 1;
 
-        let res = load_database(buf.as_slice(), String::from("abc123"));
+        let res = kdbx::load_database(buf.as_slice(), String::from("abc123"));
 
         match res {
             Err(KeepassLoadError::StreamStartMismatch) => {},
@@ -649,7 +656,7 @@ mod tests {
 
         buf[73] = 15;
 
-        let res = load_database(buf.as_slice(), String::from("abc123"));
+        let res = kdbx::load_database(buf.as_slice(), String::from("abc123"));
 
         match res {
             Err(KeepassLoadError::InvalidFieldID) => {},
