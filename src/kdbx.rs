@@ -214,28 +214,21 @@ fn validate_signature(mut db_file: impl Read) -> Result<(), KeepassLoadError> {
 }
 
 struct KeepassHeader {
-    // master_seed: [u8; 32],
-    // transform_seed: [u8; 32],
-    // encryption_iv: [u8; 32],
-    // protected_stream_key: [u8; 32],
-    // stream_start_bytes: [u8; 32],
-    master_seed: Vec<u8>,
-    transform_seed: Vec<u8>,
-    encryption_iv: Vec<u8>,
+    master_seed: [u8; 32],
+    transform_seed: [u8; 32],
+    encryption_iv: [u8; 16],
+    protected_stream_key: [u8; 32],
+    stream_start_bytes: [u8; 32],
     transform_rounds: u64,
-    protected_stream_key: Vec<u8>,
-    stream_start_bytes: Vec<u8>,
 }
 
 fn read_database_headers(mut db_file: impl Read) -> Result<KeepassHeader, KeepassLoadError> {
-    // XXX just use [u8; 32] and friends here?
-    // XXX is using with_capacity actually helpful here?
-    let mut master_seed = Vec::with_capacity(32);
-    let mut transform_seed = Vec::with_capacity(32);
-    let mut encryption_iv = Vec::with_capacity(32);
+    let mut master_seed = [0u8; 32];
+    let mut transform_seed = [0u8; 32];
+    let mut encryption_iv = [0u8; 16];
     let mut transform_rounds = 0u64;
-    let mut protected_stream_key = Vec::with_capacity(32);
-    let mut stream_start_bytes = Vec::with_capacity(32);
+    let mut protected_stream_key = [0u8; 32];
+    let mut stream_start_bytes = [0u8; 32];
 
     loop {
         let mut field_id_buf = [0u8; 1];
@@ -267,37 +260,22 @@ fn read_database_headers(mut db_file: impl Read) -> Result<KeepassHeader, Keepas
                 }
             },
             FieldID::MasterSeed => {
-                if field_data.len() != 32 {
-                    return Err(KeepassLoadError::InvalidFieldLength);
-                }
-                master_seed = field_data;
+                master_seed = field_data.try_into().map_err(|_| KeepassLoadError::InvalidFieldLength)?;
             },
             FieldID::TransformSeed => {
-                if field_data.len() != 32 {
-                    return Err(KeepassLoadError::InvalidFieldLength);
-                }
-                transform_seed = field_data;
+                transform_seed = field_data.try_into().map_err(|_| KeepassLoadError::InvalidFieldLength)?;
             },
             FieldID::TransformRounds => {
                 transform_rounds = u64::from_le_bytes(field_data.try_into().map_err(|_| KeepassLoadError::InvalidFieldLength)?);
             },
             FieldID::EncryptionIV => {
-                if field_data.len() != 16 {
-                    return Err(KeepassLoadError::InvalidFieldLength);
-                }
-                encryption_iv = field_data;
+                encryption_iv = field_data.try_into().map_err(|_| KeepassLoadError::InvalidFieldLength)?;
             },
             FieldID::ProtectedStreamKey => {
-                if field_data.len() != 32 {
-                    return Err(KeepassLoadError::InvalidFieldLength);
-                }
-                protected_stream_key = field_data;
+                protected_stream_key = field_data.try_into().map_err(|_| KeepassLoadError::InvalidFieldLength)?;
             },
             FieldID::StreamStartBytes => {
-                if field_data.len() != 32 {
-                    return Err(KeepassLoadError::InvalidFieldLength);
-                }
-                stream_start_bytes = field_data;
+                stream_start_bytes = field_data.try_into().map_err(|_| KeepassLoadError::InvalidFieldLength)?;
             },
             FieldID::InnerRandomStreamID => {
                 let stream_id = u32::from_le_bytes(field_data.try_into().map_err(|_| KeepassLoadError::InvalidFieldLength)?);
