@@ -1,3 +1,5 @@
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
 use std::io;
 use std::convert::{TryFrom, TryInto};
 
@@ -46,6 +48,26 @@ pub enum KeepassLoadError {
     StreamStartMismatch,
     InvalidFinalHash,
     Unimplemented,
+}
+
+impl Display for KeepassLoadError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "failed to load KeePass database: {:?}", self)
+    }
+}
+
+impl Error for KeepassLoadError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            KeepassLoadError::IO(err)          => Some(err),
+            //KeepassLoadError::CipherError(err) => Some(err),
+            KeepassLoadError::XMLError(err)    => Some(err),
+            KeepassLoadError::Base64Error(err) => Some(err),
+            KeepassLoadError::UTF8Error(err)   => Some(err),
+
+            _ => None,
+        }
+    }
 }
 
 impl From<io::Error> for KeepassLoadError {
