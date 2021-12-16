@@ -436,14 +436,9 @@ pub fn load_database(mut db_file: impl Read, password: String) -> Result<Keepass
     read_database_blocks(&header, &mut remaining_plaintext)
 }
 
-fn decrypt_passwords(group: &KeepassDatabaseGroup, password_decryptor: &mut Salsa20) -> Result<KeepassDatabaseGroup, KeepassLoadError> {
-    let mut new_groups = Vec::with_capacity(group.groups.len());
-    for subgroup in &group.groups {
-        new_groups.push(decrypt_passwords(subgroup, password_decryptor)?);
-    }
-
-    let mut new_entries = Vec::with_capacity(group.entries.len());
-    for entry in &group.entries {
+fn decrypt_entries(entries: &Vec<KeepassDatabaseEntry>, password_decryptor: &mut Salsa20) -> Result<Vec<KeepassDatabaseEntry>, KeepassLoadError> {
+    let mut new_entries = Vec::with_capacity(entries.len());
+    for entry in entries {
         let mut decrypted_key_values = Vec::with_capacity(entry.key_values.len());
         let mut decrypted_history = KeepassDatabaseEntryHistory{
             entries: vec![],
@@ -497,6 +492,17 @@ fn decrypt_passwords(group: &KeepassDatabaseGroup, password_decryptor: &mut Sals
             history: decrypted_history,
         });
     }
+
+    Ok(new_entries)
+}
+
+fn decrypt_passwords(group: &KeepassDatabaseGroup, password_decryptor: &mut Salsa20) -> Result<KeepassDatabaseGroup, KeepassLoadError> {
+    let mut new_groups = Vec::with_capacity(group.groups.len());
+    for subgroup in &group.groups {
+        new_groups.push(decrypt_passwords(subgroup, password_decryptor)?);
+    }
+
+    let new_entries = decrypt_entries(&group.entries, password_decryptor)?;
 
     Ok(KeepassDatabaseGroup{
         name: group.name.clone(), // XXX is this right? do I want to copy the name, or copy a reference to a string?
