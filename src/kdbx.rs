@@ -436,44 +436,70 @@ pub fn load_database(mut db_file: impl Read, password: String) -> Result<Keepass
     read_database_blocks(&header, &mut remaining_plaintext)
 }
 
-// XXX remove &mut for the group after you've fixed that
-fn decrypt_passwords(group: &mut KeepassDatabaseGroup, password_decryptor: &mut Salsa20) -> Result<KeepassDatabaseGroup, KeepassLoadError> {
+fn decrypt_passwords(group: &KeepassDatabaseGroup, password_decryptor: &mut Salsa20) -> Result<KeepassDatabaseGroup, KeepassLoadError> {
     let mut new_groups = Vec::with_capacity(group.groups.len());
-    for subgroup in &mut group.groups {
+    for subgroup in &group.groups {
         new_groups.push(decrypt_passwords(subgroup, password_decryptor)?);
     }
 
     let mut new_entries = Vec::with_capacity(group.entries.len());
-    // XXX I'm overwriting shit for now - whatever at the moment
-    for entry in &mut group.entries {
-        for kv in &mut entry.key_values {
-            // XXX properly detecting the Protected attribute would be the right move here
-            if kv.key == "Password" {
+    for entry in &group.entries {
+        let mut decrypted_key_values = Vec::with_capacity(entry.key_values.len());
+        let mut decrypted_history = KeepassDatabaseEntryHistory{
+            entries: vec![],
+        };
+
+        for kv in &entry.key_values {
+            let value = if kv.key == "Password" { // XXX properly detecting the Protected attribute would be the right move here
                 let ciphertext = base64::decode(kv.value.as_bytes())?;
                 let mut password_buf = vec![0; ciphertext.len()];
 
                 password_decryptor.process(ciphertext.as_slice(), password_buf.as_mut_slice());
-                kv.value = String::from_utf8(password_buf)?;
-            }
+                String::from_utf8(password_buf)?
+            } else {
+                kv.value.clone()
+            };
+
+            decrypted_key_values.push(KeeValuePair{
+                key: kv.key.clone(),
+                value: value,
+            });
         }
 
         // process history just to thread the salsa20 state through
         for history_entry in &entry.history.entries {
+            let mut decrypted_key_values = Vec::with_capacity(history_entry.key_values.len());
+
             for kv in &history_entry.key_values {
-                if kv.key == "Password" {
+                let value = if kv.key == "Password" { // XXX properly detecting the Protected attribute would be the right move here
                     let ciphertext = base64::decode(kv.value.as_bytes())?;
                     let mut password_buf = vec![0; ciphertext.len()];
 
                     password_decryptor.process(ciphertext.as_slice(), password_buf.as_mut_slice());
-                    // knowingly discard result
-                }
+                    String::from_utf8(password_buf)?
+                } else {
+                    kv.value.clone()
+                };
+
+                decrypted_key_values.push(KeeValuePair{
+                    key: kv.key.clone(),
+                    value: value,
+                });
             }
+            decrypted_history.entries.push(KeepassDatabaseEntry{
+                key_values: decrypted_key_values,
+                history: KeepassDatabaseEntryHistory{entries: vec![]},
+            })
         }
-        new_entries.push(entry.clone());
+
+        new_entries.push(KeepassDatabaseEntry{
+            key_values: decrypted_key_values,
+            history: decrypted_history,
+        });
     }
 
     Ok(KeepassDatabaseGroup{
-        name: group.name.clone(),
+        name: group.name.clone(), // XXX is this right? do I want to copy the name, or copy a reference to a string?
         groups: new_groups,
         entries: new_entries,
     })

@@ -16,15 +16,15 @@ fn dump_database(g: &kdbx::KeepassDatabaseGroup, depth: u8) {
         dump_database(&subgroup, depth + 1);
     }
     for entry in &g.entries {
-        let mut name = String::new();
-        let mut password = String::new();
+        let mut name = &String::new();
+        let mut password = &String::new();
 
         for kv in &entry.key_values {
             if kv.key == "Title" {
-                name = kv.value.clone();
+                name = &kv.value;
             }
             if kv.key == "Password" {
-                password = kv.value.clone();
+                password = &kv.value;
             }
         }
 
