@@ -93,16 +93,8 @@ mod tests {
     }
 
     // XXX using &str would be cool, but I need to learn lifetimes
-    fn find_value(entry: &KeepassDatabaseEntry, key: &'static str) -> Option<String> {
-        // XXX use iter method
-        // XXX can I destructure here?
-        for kv_pair in &entry.key_values {
-            if kv_pair.key == key {
-                return Some(kv_pair.value.clone());
-            }
-        }
-
-        None
+    fn find_value(entry: &KeepassDatabaseEntry, target_key: &'static str) -> Option<String> {
+        entry.key_values.iter().filter(|kdbx::KeeValuePair{key, ..}| key == target_key).next().map(|kdbx::KeeValuePair{value, ..}| value.clone())
     }
 
     #[test]
