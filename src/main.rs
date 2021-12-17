@@ -61,12 +61,68 @@ mod tests {
     use std::fs::File;
     use std::io::Read;
     
-    use crate::kdbx::{self, KeepassLoadError};
+    use crate::kdbx::{self, KeepassDatabase, KeepassDatabaseEntry, KeepassLoadError};
+
+    fn find_entry(db: &KeepassDatabase, path: &'static str) -> Option<KeepassDatabaseEntry> {
+        let mut g = &db.root;
+        let mut path_pieces = path.split('/').map(String::from).collect::<Vec<String>>();
+
+        path_pieces.insert(0, String::from("Root"));
+
+        'outerLoop:
+        // XXX is there a better syntax here for "all but the last"?
+        for name in &path_pieces[..path_pieces.len()-1] {
+            for subgroup in &g.groups {
+                if name == &subgroup.name {
+                    g = subgroup;
+                    continue 'outerLoop;
+                }
+            }
+
+            return None;
+        }
+
+        let entry_name = &path_pieces[path_pieces.len()-1];
+        for entry in &g.entries {
+            match find_value(&entry, "Title") {
+                Some(name) if &name == entry_name => { return Some(entry.clone()); },
+                _ => (),
+            }
+        }
+        None
+    }
+
+    // XXX using &str would be cool, but I need to learn lifetimes
+    fn find_value(entry: &KeepassDatabaseEntry, key: &'static str) -> Option<String> {
+        // XXX use iter method
+        // XXX can I destructure here?
+        for kv_pair in &entry.key_values {
+            if kv_pair.key == key {
+                return Some(kv_pair.value.clone());
+            }
+        }
+
+        None
+    }
 
     #[test]
     fn valid_kdbx_file() {
         let f = File::open("one.kdbx").unwrap();
         let _ = kdbx::load_database(f, String::from("abc123")).unwrap();
+    }
+
+    #[test]
+    fn test_entries_are_present() {
+        let f = File::open("one.kdbx").unwrap();
+        let db = kdbx::load_database(f, String::from("abc123")).unwrap();
+
+        let entry_one = find_entry(&db, "Test/one").unwrap();
+        let entry_two = find_entry(&db, "Test/two").unwrap();
+        let entry_three = find_entry(&db, "Test/three").unwrap();
+
+        assert_eq!(find_value(&entry_one, "Password").unwrap(), "fUBH7WxV8O9sBhvh");
+        assert_eq!(find_value(&entry_two, "Password").unwrap(), "RtT4godVcetADfvz");
+        assert_eq!(find_value(&entry_three, "Password").unwrap(), "eMjUwPLadNQeniIl");
     }
 
     #[test]
