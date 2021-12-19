@@ -497,11 +497,7 @@ fn decrypt_entries(entries: &Vec<KeepassDatabaseEntry>, password_decryptor: &mut
 }
 
 fn decrypt_passwords(group: &KeepassDatabaseGroup, password_decryptor: &mut Salsa20) -> Result<KeepassDatabaseGroup, KeepassLoadError> {
-    let mut new_groups = Vec::with_capacity(group.groups.len());
-    for subgroup in &group.groups {
-        new_groups.push(decrypt_passwords(subgroup, password_decryptor)?);
-    }
-
+    let new_groups = group.groups.iter().map(|subgroup| decrypt_passwords(&subgroup, password_decryptor)).into_iter().collect::<Result<_, _>>()?;
     let new_entries = decrypt_entries(&group.entries, password_decryptor)?;
 
     Ok(KeepassDatabaseGroup{
