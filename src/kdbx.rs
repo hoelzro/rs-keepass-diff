@@ -436,53 +436,42 @@ pub fn load_database(mut db_file: impl Read, password: String) -> Result<Keepass
     read_database_blocks(&header, &mut remaining_plaintext)
 }
 
+fn decrypt_key_values(key_values: &Vec<KeeValuePair>, password_decryptor: &mut Salsa20) -> Result<Vec<KeeValuePair>, KeepassLoadError> {
+    let mut decrypted_key_values = Vec::with_capacity(key_values.len());
+
+    for kv in key_values {
+        let value = if kv.key == "Password" { // XXX properly detecting the Protected attribute would be the right move here
+            let ciphertext = base64::decode(kv.value.as_bytes())?;
+            let mut password_buf = vec![0; ciphertext.len()];
+
+            password_decryptor.process(ciphertext.as_slice(), password_buf.as_mut_slice());
+            String::from_utf8(password_buf)?
+        } else {
+            kv.value.clone()
+        };
+
+        decrypted_key_values.push(KeeValuePair{
+            key: kv.key.clone(),
+            value: value,
+        });
+    }
+
+    Ok(decrypted_key_values)
+}
+
 fn decrypt_entries(entries: &Vec<KeepassDatabaseEntry>, password_decryptor: &mut Salsa20) -> Result<Vec<KeepassDatabaseEntry>, KeepassLoadError> {
     let mut new_entries = Vec::with_capacity(entries.len());
     for entry in entries {
-        let mut decrypted_key_values = Vec::with_capacity(entry.key_values.len());
+        let decrypted_key_values = decrypt_key_values(&entry.key_values, password_decryptor)?;
         let mut decrypted_history = KeepassDatabaseEntryHistory{
             entries: vec![],
         };
 
-        for kv in &entry.key_values {
-            let value = if kv.key == "Password" { // XXX properly detecting the Protected attribute would be the right move here
-                let ciphertext = base64::decode(kv.value.as_bytes())?;
-                let mut password_buf = vec![0; ciphertext.len()];
-
-                password_decryptor.process(ciphertext.as_slice(), password_buf.as_mut_slice());
-                String::from_utf8(password_buf)?
-            } else {
-                kv.value.clone()
-            };
-
-            decrypted_key_values.push(KeeValuePair{
-                key: kv.key.clone(),
-                value: value,
-            });
-        }
-
         // process history just to thread the salsa20 state through
         for history_entry in &entry.history.entries {
-            let mut decrypted_key_values = Vec::with_capacity(history_entry.key_values.len());
-
-            for kv in &history_entry.key_values {
-                let value = if kv.key == "Password" { // XXX properly detecting the Protected attribute would be the right move here
-                    let ciphertext = base64::decode(kv.value.as_bytes())?;
-                    let mut password_buf = vec![0; ciphertext.len()];
-
-                    password_decryptor.process(ciphertext.as_slice(), password_buf.as_mut_slice());
-                    String::from_utf8(password_buf)?
-                } else {
-                    kv.value.clone()
-                };
-
-                decrypted_key_values.push(KeeValuePair{
-                    key: kv.key.clone(),
-                    value: value,
-                });
-            }
+            // XXX iterator
             decrypted_history.entries.push(KeepassDatabaseEntry{
-                key_values: decrypted_key_values,
+                key_values: decrypt_key_values(&history_entry.key_values, password_decryptor)?,
                 history: KeepassDatabaseEntryHistory{entries: vec![]},
             })
         }
