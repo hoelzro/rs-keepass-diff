@@ -437,9 +437,7 @@ pub fn load_database(mut db_file: impl Read, password: String) -> Result<Keepass
 }
 
 fn decrypt_key_values(key_values: &Vec<KeeValuePair>, password_decryptor: &mut Salsa20) -> Result<Vec<KeeValuePair>, KeepassLoadError> {
-    let mut decrypted_key_values = Vec::with_capacity(key_values.len());
-
-    for kv in key_values {
+    key_values.iter().map(|kv| {
         let value = if kv.key == "Password" { // XXX properly detecting the Protected attribute would be the right move here
             let ciphertext = base64::decode(kv.value.as_bytes())?;
             let mut password_buf = vec![0; ciphertext.len()];
@@ -450,13 +448,11 @@ fn decrypt_key_values(key_values: &Vec<KeeValuePair>, password_decryptor: &mut S
             kv.value.clone()
         };
 
-        decrypted_key_values.push(KeeValuePair{
+        Ok(KeeValuePair{
             key: kv.key.clone(),
             value: value,
-        });
-    }
-
-    Ok(decrypted_key_values)
+        })
+    }).collect()
 }
 
 fn decrypt_entries(entries: &Vec<KeepassDatabaseEntry>, password_decryptor: &mut Salsa20) -> Result<Vec<KeepassDatabaseEntry>, KeepassLoadError> {
