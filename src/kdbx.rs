@@ -456,8 +456,7 @@ fn decrypt_key_values(key_values: &Vec<KeeValuePair>, password_decryptor: &mut S
 }
 
 fn decrypt_entries(entries: &Vec<KeepassDatabaseEntry>, password_decryptor: &mut Salsa20) -> Result<Vec<KeepassDatabaseEntry>, KeepassLoadError> {
-    let mut new_entries = Vec::with_capacity(entries.len());
-    for entry in entries {
+    entries.iter().map(|entry| {
         let decrypted_key_values = decrypt_key_values(&entry.key_values, password_decryptor)?;
 
         // process history just to thread the salsa20 state through
@@ -468,13 +467,11 @@ fn decrypt_entries(entries: &Vec<KeepassDatabaseEntry>, password_decryptor: &mut
             })).collect::<Result<Vec<_>, KeepassLoadError>>()?,
         };
 
-        new_entries.push(KeepassDatabaseEntry{
+        Ok(KeepassDatabaseEntry{
             key_values: decrypted_key_values,
             history: decrypted_history,
-        });
-    }
-
-    Ok(new_entries)
+        })
+    }).collect()
 }
 
 fn decrypt_passwords(group: &KeepassDatabaseGroup, password_decryptor: &mut Salsa20) -> Result<KeepassDatabaseGroup, KeepassLoadError> {
