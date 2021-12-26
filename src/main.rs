@@ -63,10 +63,11 @@ enum EntryOp<'a> {
 }
 
 fn entries_differ(a: &kdbx::KeepassDatabaseEntry, b: &kdbx::KeepassDatabaseEntry) -> bool {
-    let password_a = find_value(a, "Password").unwrap(); // XXX no
-    let password_b = find_value(b, "Password").unwrap(); // XXX no
-
-    password_a != password_b // XXX check more than this
+    match (find_value(a, "Password"), find_value(b, "Password")) {
+        (Some(password_a), Some(password_b)) => password_a != password_b, // XXX check more than this
+        (None, None) => true,
+        _ => false,
+    }
 }
 
 // XXX variable names: before and after or old and new
