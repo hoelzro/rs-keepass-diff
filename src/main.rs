@@ -40,11 +40,12 @@ fn find_value<'a>(entry: &'a kdbx::KeepassDatabaseEntry, target_key: &'static st
     entry.key_values.iter().filter(|kdbx::KeeValuePair{key, ..}| key == target_key).next().map(|kdbx::KeeValuePair{value, ..}| value.as_str())
 }
 
-fn collect_entries<'a>(group: &'a kdbx::KeepassDatabaseGroup, accum: &mut Vec<(String, &'a kdbx::KeepassDatabaseEntry)>, path: Vec<String>) {
+// XXX couldn't path have its own lifetime? Is there a situation in which that would make sense?
+fn collect_entries<'a>(group: &'a kdbx::KeepassDatabaseGroup, accum: &mut Vec<(String, &'a kdbx::KeepassDatabaseEntry)>, path: Vec<&'a str>) {
     for subgroup in &group.groups {
         // XXX can I do this as a single expr?
         let mut subpath = path.clone();
-        subpath.push(subgroup.name.clone()); // XXX can I avoid this?
+        subpath.push(subgroup.name.as_str());
         collect_entries(&subgroup, accum, subpath);
     }
 
