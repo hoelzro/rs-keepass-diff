@@ -36,9 +36,8 @@ fn dump_database(g: &kdbx::KeepassDatabaseGroup, depth: u8) {
     }
 }
 
-// XXX using &str would be cool, but I need to learn lifetimes
-fn find_value(entry: &kdbx::KeepassDatabaseEntry, target_key: &'static str) -> Option<String> {
-    entry.key_values.iter().filter(|kdbx::KeeValuePair{key, ..}| key == target_key).next().map(|kdbx::KeeValuePair{value, ..}| value.clone())
+fn find_value<'a>(entry: &'a kdbx::KeepassDatabaseEntry, target_key: &'static str) -> Option<&'a str> {
+    entry.key_values.iter().filter(|kdbx::KeeValuePair{key, ..}| key == target_key).next().map(|kdbx::KeeValuePair{value, ..}| value.as_str())
 }
 
 fn collect_entries<'a>(group: &'a kdbx::KeepassDatabaseGroup, accum: &mut Vec<(String, &'a kdbx::KeepassDatabaseEntry)>, path: Vec<String>) {
