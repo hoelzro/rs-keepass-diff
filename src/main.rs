@@ -71,7 +71,6 @@ fn entries_differ(a: &kdbx::KeepassDatabaseEntry, b: &kdbx::KeepassDatabaseEntry
 }
 
 // XXX variable names: before and after or old and new
-// XXX removed, added, changed
 fn diff_databases<'a>(db_one: &'a kdbx::KeepassDatabase, db_two: &'a kdbx::KeepassDatabase) -> Vec<EntryOp<'a>> {
     let mut db_one_entries = vec![];
     let mut db_two_entries = vec![];
@@ -79,20 +78,20 @@ fn diff_databases<'a>(db_one: &'a kdbx::KeepassDatabase, db_two: &'a kdbx::Keepa
     collect_entries(&db_one.root, &mut db_one_entries, vec![]);
     collect_entries(&db_two.root, &mut db_two_entries, vec![]);
 
-    // XXX avoid clone
     let entry_lookup_one: HashMap<String, &kdbx::KeepassDatabaseEntry> = HashMap::from_iter(db_one_entries.into_iter());
     let entry_lookup_two: HashMap<String, &kdbx::KeepassDatabaseEntry> = HashMap::from_iter(db_two_entries.into_iter());
 
     let mut diff = vec![];
 
     for (path, &entry_one) in &entry_lookup_one {
-        if entry_lookup_two.contains_key(path) {
-            let entry_two = entry_lookup_two.get(path).unwrap(); // XXX no
-            if entries_differ(entry_one, entry_two) {
+        match entry_lookup_two.get(path) {
+            Some(entry_two) if entries_differ(entry_one, entry_two) => {
                 diff.push(EntryOp::Changed(entry_one, entry_two));
             }
-        } else {
-            diff.push(EntryOp::Deleted(entry_one));
+            None => {
+                diff.push(EntryOp::Deleted(entry_one));
+            }
+            _ => (),
         }
     }
 
