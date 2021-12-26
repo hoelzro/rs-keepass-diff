@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::env;
 use std::fs::File;
+use std::iter::FromIterator;
 use std::process;
 
 mod kdbx;
@@ -34,6 +36,76 @@ fn dump_database(g: &kdbx::KeepassDatabaseGroup, depth: u8) {
     }
 }
 
+// XXX using &str would be cool, but I need to learn lifetimes
+fn find_value(entry: &kdbx::KeepassDatabaseEntry, target_key: &'static str) -> Option<String> {
+    entry.key_values.iter().filter(|kdbx::KeeValuePair{key, ..}| key == target_key).next().map(|kdbx::KeeValuePair{value, ..}| value.clone())
+}
+
+fn collect_entries<'a>(group: &'a kdbx::KeepassDatabaseGroup, accum: &mut Vec<(String, &'a kdbx::KeepassDatabaseEntry)>, path: Vec<String>) {
+    for subgroup in &group.groups {
+        // XXX can I do this as a single expr?
+        let mut subpath = path.clone();
+        subpath.push(subgroup.name.clone()); // XXX can I avoid this?
+        collect_entries(&subgroup, accum, subpath);
+    }
+
+    for entry in &group.entries {
+        let title = find_value(entry, "Title").unwrap(); // XXX handle properly
+        let path = path.join("/") + "/" + &title;
+        accum.push( (path, entry) );
+    }
+}
+
+enum EntryOp<'a> {
+    Added(&'a kdbx::KeepassDatabaseEntry),
+    Deleted(&'a kdbx::KeepassDatabaseEntry),
+    Changed(&'a kdbx::KeepassDatabaseEntry, &'a kdbx::KeepassDatabaseEntry),
+}
+
+fn entries_differ(a: &kdbx::KeepassDatabaseEntry, b: &kdbx::KeepassDatabaseEntry) -> bool {
+    let password_a = find_value(a, "Password").unwrap(); // XXX no
+    let password_b = find_value(b, "Password").unwrap(); // XXX no
+
+    password_a != password_b // XXX check more than this
+}
+
+// XXX variable names: before and after or old and new
+// XXX removed, added, changed
+fn diff_databases<'a>(db_one: &'a kdbx::KeepassDatabase, db_two: &'a kdbx::KeepassDatabase) -> Vec<EntryOp<'a>> {
+    let mut db_one_entries = vec![];
+    let mut db_two_entries = vec![];
+
+    collect_entries(&db_one.root, &mut db_one_entries, vec![]);
+    collect_entries(&db_two.root, &mut db_two_entries, vec![]);
+
+    // XXX avoid clone
+    let entry_lookup_one: HashMap<String, &kdbx::KeepassDatabaseEntry> = HashMap::from_iter(db_one_entries.into_iter());
+    let entry_lookup_two: HashMap<String, &kdbx::KeepassDatabaseEntry> = HashMap::from_iter(db_two_entries.into_iter());
+
+    let mut diff = vec![];
+
+    for (path, &entry_one) in &entry_lookup_one {
+        if entry_lookup_two.contains_key(path) {
+            let entry_two = entry_lookup_two.get(path).unwrap(); // XXX no
+            if entries_differ(entry_one, entry_two) {
+                diff.push(EntryOp::Changed(entry_one, entry_two));
+            }
+        } else {
+            diff.push(EntryOp::Deleted(entry_one));
+        }
+    }
+
+    for (path, &entry) in &entry_lookup_two {
+        if entry_lookup_one.contains_key(path) {
+            continue;
+        }
+
+        diff.push(EntryOp::Added(entry));
+    }
+
+    diff
+}
+
 fn main() {
     let args: Vec<_> = env::args().collect();
 
@@ -60,8 +132,9 @@ fn main() {
 mod tests {
     use std::fs::File;
     use std::io::Read;
-    
+
     use crate::kdbx::{self, KeepassDatabase, KeepassDatabaseEntry, KeepassLoadError};
+    use crate::{diff_databases, find_value};
 
     fn find_entry(db: &KeepassDatabase, path: &'static str) -> Option<KeepassDatabaseEntry> {
         let mut g = &db.root;
@@ -90,11 +163,6 @@ mod tests {
             }
         }
         None
-    }
-
-    // XXX using &str would be cool, but I need to learn lifetimes
-    fn find_value(entry: &KeepassDatabaseEntry, target_key: &'static str) -> Option<String> {
-        entry.key_values.iter().filter(|kdbx::KeeValuePair{key, ..}| key == target_key).next().map(|kdbx::KeeValuePair{value, ..}| value.clone())
     }
 
     #[test]
@@ -227,5 +295,23 @@ mod tests {
             Err(KeepassLoadError::InvalidFieldID) => {},
             _ => panic!("Expected InvalidFieldID, got {:?}", res),
         }
+    }
+
+    #[test]
+    fn correct_diffs() {
+        let mut f = File::open("one.kdbx").unwrap();
+        let db_one = kdbx::load_database(f, String::from("abc123")).unwrap();
+
+        let mut f = File::open("two.kdbx").unwrap();
+        let db_two = kdbx::load_database(f, String::from("abc123")).unwrap();
+
+        let diff = diff_databases(&db_one, &db_two);
+
+        /* Test
+         *   Entry 'one' has two different passwords (one.kdbx is newer)
+         *   Entry 'two' exists in one.kdbx, but not two.kdbx
+         */
+        assert_eq!(diff.len(), 2);
+        // XXX better check
     }
 }
