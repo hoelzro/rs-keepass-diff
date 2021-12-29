@@ -118,10 +118,9 @@ fn main() {
     };
 
     let password = read_password();
-    // XXX why doesn't this have to be `let mut f`?
-    let f = File::open(filename).unwrap();
+    let mut f = File::open(filename).unwrap();
     // XXX defer f.close() ?
-    let keepass_db = kdbx::load_database(f, password).unwrap();
+    let keepass_db = kdbx::load_database(&mut f, password).unwrap();
 
     dump_database(&keepass_db.root, 0);
 
@@ -167,14 +166,14 @@ mod tests {
 
     #[test]
     fn valid_kdbx_file() {
-        let f = File::open("one.kdbx").unwrap();
-        let _ = kdbx::load_database(f, String::from("abc123")).unwrap();
+        let mut f = File::open("one.kdbx").unwrap();
+        let _ = kdbx::load_database(&mut f, String::from("abc123")).unwrap();
     }
 
     #[test]
     fn test_entries_are_present() {
-        let f = File::open("one.kdbx").unwrap();
-        let db = kdbx::load_database(f, String::from("abc123")).unwrap();
+        let mut f = File::open("one.kdbx").unwrap();
+        let db = kdbx::load_database(&mut f, String::from("abc123")).unwrap();
 
         let entry_one = find_entry(&db, "Test/one").unwrap();
         let entry_two = find_entry(&db, "Test/two").unwrap();
@@ -193,7 +192,7 @@ mod tests {
 
         buf[0] += 1;
 
-        let res = kdbx::load_database(buf.as_slice(), String::from("abc123"));
+        let res = kdbx::load_database(&mut &buf[..], String::from("abc123"));
 
         match res {
             Err(KeepassLoadError::BadMagicSignature) => {},
@@ -209,7 +208,7 @@ mod tests {
 
         buf[10] = 4;
 
-        let res = kdbx::load_database(buf.as_slice(), String::from("abc123"));
+        let res = kdbx::load_database(&mut &buf[..], String::from("abc123"));
 
         match res {
             Err(KeepassLoadError::BadFileVersion) => {},
@@ -225,7 +224,7 @@ mod tests {
 
         buf[15] += 1;
 
-        let res = kdbx::load_database(buf.as_slice(), String::from("abc123"));
+        let res = kdbx::load_database(&mut &buf[..], String::from("abc123"));
 
         match res {
             Err(KeepassLoadError::UnsupportedCipher) => {},
@@ -241,7 +240,7 @@ mod tests {
 
         buf[34] += 1;
 
-        let res = kdbx::load_database(buf.as_slice(), String::from("abc123"));
+        let res = kdbx::load_database(&mut &buf[..], String::from("abc123"));
 
         match res {
             Err(KeepassLoadError::UnsupportedCompressionAlgorithm) => {},
@@ -257,7 +256,7 @@ mod tests {
 
         buf[211] += 1;
 
-        let res = kdbx::load_database(buf.as_slice(), String::from("abc123"));
+        let res = kdbx::load_database(&mut &buf[..], String::from("abc123"));
 
         match res {
             Err(KeepassLoadError::UnsupportedStreamAlgorithm) => {},
@@ -273,7 +272,7 @@ mod tests {
 
         buf[176] += 1;
 
-        let res = kdbx::load_database(buf.as_slice(), String::from("abc123"));
+        let res = kdbx::load_database(&mut &buf[..], String::from("abc123"));
 
         match res {
             Err(KeepassLoadError::StreamStartMismatch) => {},
@@ -289,7 +288,7 @@ mod tests {
 
         buf[73] = 15;
 
-        let res = kdbx::load_database(buf.as_slice(), String::from("abc123"));
+        let res = kdbx::load_database(&mut &buf[..], String::from("abc123"));
 
         match res {
             Err(KeepassLoadError::InvalidFieldID) => {},
@@ -300,10 +299,10 @@ mod tests {
     #[test]
     fn correct_diffs() {
         let mut f = File::open("one.kdbx").unwrap();
-        let db_one = kdbx::load_database(f, String::from("abc123")).unwrap();
+        let db_one = kdbx::load_database(&mut f, String::from("abc123")).unwrap();
 
         let mut f = File::open("two.kdbx").unwrap();
-        let db_two = kdbx::load_database(f, String::from("abc123")).unwrap();
+        let db_two = kdbx::load_database(&mut f, String::from("abc123")).unwrap();
 
         let diff = diff_databases(&db_one, &db_two);
 

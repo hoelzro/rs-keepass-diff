@@ -183,7 +183,7 @@ pub struct KeepassDatabase {
     pub root: KeepassDatabaseGroup
 }
 
-fn validate_signature(mut db_file: impl Read) -> Result<(), KeepassLoadError> {
+fn validate_signature(db_file: &mut impl Read) -> Result<(), KeepassLoadError> {
     let mut buf = [0u8; 4];
 
     db_file.read_exact(&mut buf)?;
@@ -222,7 +222,7 @@ struct KeepassHeader {
     transform_rounds: u64,
 }
 
-fn read_database_headers(mut db_file: impl Read) -> Result<KeepassHeader, KeepassLoadError> {
+fn read_database_headers(db_file: &mut impl Read) -> Result<KeepassHeader, KeepassLoadError> {
     let mut master_seed = [0u8; 32];
     let mut transform_seed = [0u8; 32];
     let mut encryption_iv = [0u8; 16];
@@ -355,7 +355,7 @@ fn compute_master_key(header: &KeepassHeader, password: String) -> Result<[u8; 3
     Ok(master_key)
 }
 
-fn read_database_blocks(header: &KeepassHeader, mut plaintext: impl Read) -> Result<KeepassDatabase, KeepassLoadError> {
+fn read_database_blocks(header: &KeepassHeader, plaintext: &mut impl Read) -> Result<KeepassDatabase, KeepassLoadError> {
     loop {
         let mut buf = [0u8; 4];
         plaintext.read_exact(&mut buf)?;
@@ -399,10 +399,10 @@ fn read_database_blocks(header: &KeepassHeader, mut plaintext: impl Read) -> Res
     }
 }
 
-pub fn load_database(mut db_file: impl Read, password: String) -> Result<KeepassDatabase, KeepassLoadError> {
-    validate_signature(&mut db_file)?;
+pub fn load_database(db_file: &mut impl Read, password: String) -> Result<KeepassDatabase, KeepassLoadError> {
+    validate_signature(db_file)?;
 
-    let header = read_database_headers(&mut db_file)?;
+    let header = read_database_headers(db_file)?;
 
     let master_key = compute_master_key(&header, password)?;
 
